@@ -61,21 +61,10 @@ jobs:
           container-registry-username: '${{ github.repository_owner }}'
           container-registry-password: '${{ secrets.REGISTRY_TOKEN }}'
           secret-name: pull-registry
-      - name: Render K8s manifests
-        uses: 'https://github.com/azure/k8s-bake@v2.4'
-        with:
-          renderEngine: kustomize
-          kustomizationPath: 'k8s/overlays/${{ matrix.environment }}'
-          kubectl-version: latest
-        id: bake
-      - name: Validate created manifest ${{ matrix.environment }}
-        uses: 'https://github.com/azure/k8s-lint@v2'
-        with:
-          manifests: ${{ steps.bake.outputs.manifestsBundle }}
       - name: Deploy K8s manifests
         uses: 'https://github.com/azure/k8s-deploy@v4'
         with:
-          manifests: '${{ steps.bake.outputs.manifestsBundle }}'
+          manifests: 'k8s/minimal_k8s.yaml'
           namespace: self-applications
           images: |
             gitea.dxas90.xyz/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}

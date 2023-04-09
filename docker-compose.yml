@@ -1,0 +1,25 @@
+version: "3.7"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      no_cache: true
+      pull: true
+      platforms:
+        - "linux/amd64"
+        - "linux/arm64"
+      args:
+        - COMMIT_HASH=${COMMIT_HASH:-}
+      tags:
+        - "notify-tg-bot:latest"
+    image: notify-tg-bot
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
+  redis_cache:
+    image: redis:alpine
+    env_file:
+      - .env

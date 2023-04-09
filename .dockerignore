@@ -1,0 +1,20 @@
+# ignore .git and .cache folder and directories
+.cache
+.git*
+
+# ignore all markdown files (md)
+*.md
+!README.md
+
+# ignore performance tests
+performance-tests
+
+# ignore docker compose
+docker-compose.yml
+
+*.log
+
+# kubernetes files
+k8s/
+
+.venv

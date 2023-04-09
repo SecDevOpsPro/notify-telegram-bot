@@ -32,7 +32,9 @@ Replace `YOUR_BOT_TOKEN` with the bot token obtained in step 1.
 2. Edit the `bot.py` file to customize your notification messages, schedule, and other settings.
 3. Run the bot using the following command:
 
+```sh
 python bot.py
+```
 
 4. Start a chat with your bot on Telegram and send commands or messages to trigger notifications.
 

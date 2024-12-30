@@ -8,7 +8,6 @@ build-backend = "setuptools.build_meta"
 name = "notify_bot"
 version = "0.1.0"
 description = "Personal telegram Bot."
-license = "MIT"
 readme = "README.md"
 authors = ["Daniel Ramirez <dxas90@gmail.com>"]
 

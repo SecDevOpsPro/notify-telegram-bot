@@ -28,7 +28,7 @@
               virtualenv venv
               source venv/bin/activate
               python -m pip install --upgrade twine build
-              python -m build              
+              pip install ./notify_bot
           - name: Publish package to Gitea Package Registry
             uses: 'https://github.com/pypa/gh-action-pypi-publish@v1.10.1'
             with:

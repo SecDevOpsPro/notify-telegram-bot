@@ -8,3 +8,4 @@ importlib.reload(notify_bot.main)
 notify_bot.main.run_bot()
 
 all = [run_bot]  # noqa: F405
+

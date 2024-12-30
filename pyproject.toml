@@ -5,7 +5,7 @@ description = "Personal telegram Bot."
 authors = ["Daniel Ramirez <dxas90@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-# packages = [{include = "src", format = ["sdist", "wheel"]}]
+packages = [{include = "notify_bot", format = ["sdist", "wheel"]}]
 
 [tool.poetry.scripts]
 # devtest = { callable = "mypackage:test.run_tests", extras = ["test"] }

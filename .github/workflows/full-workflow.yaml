@@ -1,73 +1,64 @@
 ---
-name: Build and Push and Deploy to K8s a Docker Image
-on:
-  push:
-    branches:
-      - main
-env:
-  IMAGE_NAME: telegram-notify-bot
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: 'https://github.com/actions/checkout@v3'
-      - name: Set up QEMU
-        uses: 'https://github.com/docker/setup-qemu-action@v2'
-      - name: Set up Docker Buildx
-        uses: 'https://github.com/docker/setup-buildx-action@v2'
-      - name: Set up Python
-        uses: 'https://github.com/actions/setup-python@v4'
-        with:
-          python-version: '3.10'
-          cache: pip
-      - run: pip install --no-cache-dir -r fastapi_ipblocks/requirements.txt
-      - name: Login to Gitea Container Registry
-        uses: 'https://github.com/docker/login-action@v2'
-        with:
-          registry: gitea.dxas90.xyz
-          username: '${{ github.repository_owner }}'
-          password: '${{ secrets.REGISTRY_TOKEN }}'
-      - name: Build Docker image
-        uses: 'https://github.com/docker/build-push-action@v4'
-        with:
-          context: .
-          push: true
-          tags:
-            - gitea.dxas90.xyz/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:rc-release
-            - gitea.dxas90.xyz/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:${{ github.sha }}
+    name: Build and Push a Docker Image and a Python Package
+    on:
+      push:
+        branches:
+          - main
+    env:
+      IMAGE_NAME: telegram-notify-bot
+    jobs:
+      build-and-push:
+        runs-on: ubuntu-latest
+        steps:
+          - name: Checkout code
+            uses: 'https://github.com/actions/checkout@v3'
+          - name: Set up QEMU
+            uses: 'https://github.com/docker/setup-qemu-action@v2'
+          - name: Set up Docker Buildx
+            uses: 'https://github.com/docker/setup-buildx-action@v2'
+          - name: Set up Python
+            uses: 'https://github.com/actions/setup-python@v4'
+            with:
+              python-version: '3.10'
+              cache: pip
+          - name: Build python package
+            run: |
+              python --version ; pip --version  # For debugging
+              pip install virtualenv
+              virtualenv venv
+              source venv/bin/activate
+              python -m pip install --upgrade twine build
+              python -m build              
+          - name: Publish package to Gitea Package Registry
+            uses: 'https://github.com/pypa/gh-action-pypi-publish@v1.10.1'
+            with:
+              verbose: true
+              skip-existing: true
+              user: ${{ github.repository_owner }}
+              password: ${{ secrets.REGISTRY_TOKEN }}
+              repository-url: https://gitea.dxas90.work/api/packages/${{ github.repository_owner }}/pypi
+          - name: Login to Gitea Container Registry
+            uses: 'https://github.com/docker/login-action@v2'
+            with:
+              registry: gitea.dxas90.work
+              username: '${{ github.repository_owner }}'
+              password: '${{ secrets.REGISTRY_TOKEN }}'
+          - name: Build Docker image
+            uses: 'https://github.com/docker/build-push-action@v4'
+            with:
+              context: .
+              push: true
+              tags: |
+                gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:rc-release
+                gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:${{ github.sha }}                
+          - name: Create Release
+            id: create_release
+            uses: 'https://github.com/actions/create-release@v1'
+            env:
+              GITHUB_TOKEN: ${{ secrets.REGISTRY_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+            with:
+              tag_name: ${{ github.ref }}
+              release_name: ${{ github.ref }}
+              draft: false
+              prerelease: false
 
-  deploy-to-k8s:
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    strategy:
-      matrix:
-        environment:
-          - staging
-    steps:
-      - name: Checkout code
-        uses: 'https://github.com/actions/checkout@v3'
-      - name: Kubectl tool installer
-        uses: 'https://github.com/azure/setup-kubectl@v3'
-      - name: Set up K8s access
-        uses: 'https://github.com/azure/k8s-set-context@v3'
-        with:
-          kubeconfig: '${{ secrets.KUBE_CONFIG }}'
-          context: ultra-secret-k3s
-      - name: Set up Registry K8s access
-        uses: 'https://github.com/azure/k8s-create-secret@v4'
-        with:
-          container-registry-url: gitea.dxas90.xyz
-          container-registry-username: '${{ github.repository_owner }}'
-          container-registry-password: '${{ secrets.REGISTRY_TOKEN }}'
-          secret-name: pull-registry
-      - name: Deploy K8s manifests
-        uses: 'https://github.com/azure/k8s-deploy@v4'
-        with:
-          manifests: 'k8s/minimal_k8s.yaml'
-          namespace: self-applications
-          images: |
-            gitea.dxas90.xyz/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          imagepullsecrets: |
-            pull-registry
----

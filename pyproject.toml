@@ -9,7 +9,7 @@ name = "notify_bot"
 version = "0.1.0"
 description = "Personal telegram Bot."
 readme = "README.md"
-authors = ["Daniel Ramirez <dxas90@gmail.com>"]
+authors = [{ name = "Daniel Ramirez", email = "dxas90@gmail.com" }]
 
 requires-python = ">=3.9.0"
 

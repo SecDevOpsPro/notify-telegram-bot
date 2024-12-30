@@ -2,8 +2,6 @@
 # https://setuptools.pypa.io/en/latest/build_meta.html
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
-wheel = true
-sdist = true
 
 [project]
 # https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html

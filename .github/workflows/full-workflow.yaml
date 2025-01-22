@@ -50,15 +50,4 @@
               push: true
               tags: |
                 gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:rc-release
-                gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:${{ github.sha }}                
-          - name: Create Release
-            id: create_release
-            uses: 'https://github.com/actions/create-release@v1'
-            env:
-              GITHUB_TOKEN: ${{ secrets.REGISTRY_TOKEN }} # This token is provided by Actions, you do not need to create your own token
-            with:
-              tag_name: ${{ github.ref }}
-              release_name: ${{ github.ref }}
-              draft: false
-              prerelease: false
-
+                gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:${{ github.sha }}

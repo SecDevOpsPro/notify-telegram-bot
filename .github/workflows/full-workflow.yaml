@@ -47,7 +47,14 @@
             uses: 'https://github.com/docker/build-push-action@v6'
             with:
               context: .
+              platforms: linux/amd64,linux/arm64
               push: true
               tags: |
                 gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:rc-release
                 gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:${{ github.sha }}
+              build-args: |
+                COMMIT_HASH=${{ github.sha }}
+                CREATED="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+                GH_ACCESS_TOKEN=${{ secrets.REGISTRY_TOKEN }}
+              secrets: |
+                GIT_AUTH_TOKEN=${{ secrets.REGISTRY_TOKEN }}

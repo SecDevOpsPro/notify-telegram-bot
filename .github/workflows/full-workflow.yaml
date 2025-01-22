@@ -13,9 +13,9 @@
           - name: Checkout code
             uses: 'https://github.com/actions/checkout@v3'
           - name: Set up QEMU
-            uses: 'https://github.com/docker/setup-qemu-action@v2'
+            uses: 'https://github.com/docker/setup-qemu-action@v3'
           - name: Set up Docker Buildx
-            uses: 'https://github.com/docker/setup-buildx-action@v2'
+            uses: 'https://github.com/docker/setup-buildx-action@v3'
           - name: Set up Python
             uses: 'https://github.com/actions/setup-python@v4'
             with:

@@ -88,5 +88,4 @@
               secrets: |
                 GIT_AUTH_TOKEN=${{ secrets.REGISTRY_TOKEN }}
               env:
-                SOURCE_DATE_EPOCH: '${{ env.TIMESTAMP }}'
-
+                SOURCE_DATE_EPOCH=${{ env.TIMESTAMP }}

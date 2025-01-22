@@ -44,7 +44,7 @@
               username: '${{ github.repository_owner }}'
               password: '${{ secrets.REGISTRY_TOKEN }}'
           - name: Build Docker image
-            uses: 'https://github.com/docker/build-push-action@v4'
+            uses: 'https://github.com/docker/build-push-action@v6'
             with:
               context: .
               push: true

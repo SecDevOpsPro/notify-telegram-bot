@@ -12,6 +12,8 @@
         steps:
           - name: Checkout code
             uses: 'https://github.com/actions/checkout@v3'
+          - name: Get Git commit timestamps
+            run: echo "TIMESTAMP=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
           - name: Set up QEMU
             uses: 'https://github.com/docker/setup-qemu-action@v3'
           - name: Set up Docker Buildx
@@ -37,6 +39,22 @@
               user: ${{ github.repository_owner }}
               password: ${{ secrets.REGISTRY_TOKEN }}
               repository-url: https://gitea.dxas90.work/api/packages/${{ github.repository_owner }}/pypi
+          - name: Docker meta
+            id: meta
+            uses: 'https://github.com/docker/metadata-action@v5'
+            with:
+              # list of Docker images to use as base name for tags
+              images: |
+                gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}
+              # generate Docker tags based on the following events/attributes
+              tags: |
+                type=schedule
+                type=ref,event=branch
+                type=ref,event=pr
+                type=semver,pattern={{version}}
+                type=semver,pattern={{major}}.{{minor}}
+                type=semver,pattern={{major}}
+                type=sha
           - name: Login to Gitea Container Registry
             uses: 'https://github.com/docker/login-action@v3'
             with:
@@ -48,7 +66,6 @@
             with:
               username: '${{ github.repository_owner }}'
               password: ${{ secrets.DOCKERHUB_TOKEN }}
-
           - name: Login to GitHub Container Registry
             uses: 'https://github.com/docker/login-action@v3'
             with:
@@ -61,12 +78,14 @@
               context: .
               platforms: linux/amd64,linux/arm64
               push: true
-              tags: |
-                gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:rc-release
-                gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}:${{ github.sha }}
+              tags: ${{ steps.meta.outputs.tags }}
+              labels: ${{ steps.meta.outputs.labels }}
+              annotations: ${{ steps.meta.outputs.annotations }}
               build-args: |
                 COMMIT_HASH=${{ github.sha }}
                 CREATED="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
                 GH_ACCESS_TOKEN=${{ secrets.REGISTRY_TOKEN }}
               secrets: |
                 GIT_AUTH_TOKEN=${{ secrets.REGISTRY_TOKEN }}
+              env:
+                SOURCE_DATE_EPOCH: ${{ env.TIMESTAMP }}

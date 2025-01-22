@@ -38,7 +38,7 @@
               password: ${{ secrets.REGISTRY_TOKEN }}
               repository-url: https://gitea.dxas90.work/api/packages/${{ github.repository_owner }}/pypi
           - name: Login to Gitea Container Registry
-            uses: 'https://github.com/docker/login-action@v2'
+            uses: 'https://github.com/docker/login-action@v3'
             with:
               registry: gitea.dxas90.work
               username: '${{ github.repository_owner }}'

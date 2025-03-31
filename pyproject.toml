@@ -14,7 +14,7 @@ authors = [{ name = "Daniel Ramirez", email = "dxas90@gmail.com" }]
 requires-python = ">=3.9.0"
 
 dependencies = [
-  "anyio==4.8.0",
+  "anyio==4.9.0",
   "cachetools==5.5.2",
   "certifi==2025.1.31",
   "charset-normalizer==3.4.1",

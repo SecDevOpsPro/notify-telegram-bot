@@ -19,11 +19,9 @@
           - name: Set up Docker Buildx
             uses: docker/setup-buildx-action@v3
             with:
-              # buildkitd-flags: --debug
               endpoint: builders
             env:
               DOCKER_HOST: "tcp://docker:2376/"
-              DOCKER_TLS_VERIFY: 1
           - name: Set up Python
             uses: actions/setup-python@v4
             with:

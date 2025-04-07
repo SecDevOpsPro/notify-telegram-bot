@@ -47,44 +47,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-
-headers = {
-    "authority": "api.cambiocuba.money",
-    "accept": "application/json, text/plain, */*",
-    "accept-language": "en-US,en;q=0.9",
-    "origin": "https://img.cambiocuba.money",
-    "referer": "https://img.cambiocuba.money/",
-    "sec-ch-ua": '"Brave";v="111", "Not(A:Brand";v="8", "Chromium";v="111"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Linux"',
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-site",
-    "sec-gpc": "1",
-    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36",
-}
-
-params = {
-    "trmi": "true",
-    "cur": "ECU",
-    "period": "7D",
-}
-
-template_str   = """
-<pre>
-{% for item in data %}
-<b>Date:</b> {{ item._id }}
-<b>Min:</b> {{ item.min }}
-<b>Max:</b> {{ item.max }}
-<b>Avg:</b> {{ item.avg }}
-<b>Count:</b> {{ item.count_values }}
-<b>Median:</b> {{ item.median }}
-<b>Compra:</b> {{ item.first.value }}, Date: {{ item.first.date }}
-<b>Venta:</b> {{ item.last.value }}, Date: {{ item.last.date }}
-{% endfor %}
-</pre>
-"""
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a message with 5 inline buttons attached."""
     number_list: List[int] = []
@@ -103,6 +65,44 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def eur_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays info on how to use the bot."""
+
+    headers = {
+        "authority": "api.cambiocuba.money",
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        "origin": "https://img.cambiocuba.money",
+        "referer": "https://img.cambiocuba.money/",
+        "sec-ch-ua": '"Brave";v="111", "Not(A:Brand";v="8", "Chromium";v="111"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Linux"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+        "sec-gpc": "1",
+        "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36",
+    }
+
+    params = {
+        "trmi": "true",
+        "cur": "ECU",
+        "period": "7D",
+    }
+
+    template_str   = """
+    <pre>
+    {% for item in data %}
+    <b>Date:</b> {{ item._id }}
+    <b>Min:</b> {{ item.min }}
+    <b>Max:</b> {{ item.max }}
+    <b>Avg:</b> {{ item.avg }}
+    <b>Count:</b> {{ item.count_values }}
+    <b>Median:</b> {{ item.median }}
+    <b>Compra:</b> {{ item.first.value }}, Date: {{ item.first.date }}
+    <b>Venta:</b> {{ item.last.value }}, Date: {{ item.last.date }}
+    {% endfor %}
+    </pre>
+    """
+
     response = requests.get(
         "https://api.cambiocuba.money/api/v1/x-rates-by-date-range",
         params=params,
@@ -111,6 +111,58 @@ async def eur_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     template = Template(template_str)
     rendered_html = template.render(data=response.json())
     await update.message.reply_photo(photo="https://wa.cambiocuba.money/trmi.png?trmi=true&cur=ECU&period=7D")
+    await update.message.reply_html(rendered_html)
+
+
+async def driver_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays info on how to use the bot."""
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0',
+        'Accept': '*/*',
+        'Accept-Language': 'en',
+        'Referer': 'https://e-uslugi.mvr.bg/en/services/obligations',
+        'Origin': 'https://e-uslugi.mvr.bg',
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Connection': 'keep-alive',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Priority': 'u=0',
+    }
+    params = {
+        'obligatedPersonType': '1',
+        'additinalDataForObligatedPersonType': '1',
+        'mode': '1',
+        'obligedPersonIdent': '9006026380',
+        'drivingLicenceNumber': '286880103',
+    }
+    cookies = {
+        'currentLang': 'en',
+    }
+    template_str = """
+    <pre>
+    {% for unit in data.obligationsData %}
+    <b>Unit Group:</b> {{ unit.unitGroup }}
+    {% if unit.obligations %}
+    {% for obligation in unit.obligations %}
+    <b>Obligation:</b> {{ obligation }}
+    <b>Law:</b> {{ "Issued under the Road Traffic Act and / or the Insurance Code" if unit.unitGroup == 1 else "Issued under the Law for the Bulgarian personal documents" }}
+    {% endfor %}
+    {% else %}
+    <b>No obligations</b>
+    <b>Law:</b> {{ "Issued under the Road Traffic Act and / or the Insurance Code" if unit.unitGroup == 1 else "Issued under the Law for the Bulgarian personal documents" }}
+    {% endif %}
+    {% endfor %}
+    </pre>
+    """
+    response = requests.get('https://e-uslugi.mvr.bg/api/Obligations/AND', params=params, cookies=cookies, headers=headers)
+
+    template = Template(template_str)
+    rendered_html = template.render(data=response.json())
+
+    await update.message.reply_photo(photo="https://icon-library.com/images/drivers-license-icon/drivers-license-icon-26.jpg")
     await update.message.reply_html(rendered_html)
 
 
@@ -176,6 +228,7 @@ def run_bot() -> None:
     # application.add_handler(CommandHandler("start", start))
     # application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("change", eur_command))
+    application.add_handler(CommandHandler("driver", driver_command))
     # application.add_handler(CommandHandler("clear", clear))
     application.add_handler(
         CallbackQueryHandler(handle_invalid_button, pattern=InvalidCallbackData)

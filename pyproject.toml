@@ -15,7 +15,7 @@ requires-python = ">=3.9.0"
 
 dependencies = [
   "anyio==4.9.0",
-  "cachetools==5.5.2",
+  "cachetools==7.0.0",
   "certifi==2025.4.26",
   "charset-normalizer==3.4.4",
   "h11==0.16.0",

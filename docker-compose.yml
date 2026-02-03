@@ -20,6 +20,6 @@ services:
     volumes:
       - ./:/app
   redis_cache:
-    image: redis:alpine
+    image: redis:alpine@sha256:4eec4565e45aa0b3966554c866bc73211e281b0b3d89fe9a33c982e6faca809d
     env_file:
       - .env

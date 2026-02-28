@@ -2,86 +2,135 @@
     name: Build and Push a Docker Image and a Python Package
     on:
       push:
-        branches:
-          - main
+        branches: [ main ]
+        tags: [ 'v*' ]
     env:
       IMAGE_NAME: telegram-notify-bot
     jobs:
-      build-and-push:
+      python-test:
         runs-on: ubuntu-latest
+        permissions:
+          id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
+          contents: read
+          packages: write
+          security-events: write
+          actions: read  # Required for CodeQL upload-sarif action
+          checks: write  # Required for publishing test results
+          pull-requests: write  # Required for PR comments
         steps:
           - name: Checkout code
-            uses: actions/checkout@v3
-          - name: Get Git commit timestamps
-            run: echo "TIMESTAMP=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
-          - name: Set up QEMU
-            uses: docker/setup-qemu-action@v3
-          - name: Set up Docker Buildx
-            uses: docker/setup-buildx-action@v3
+            uses: 'actions/checkout@v6'
             with:
-              endpoint: builders
+              fetch-tags: true
+              fetch-depth: 0
           - name: Set up Python
-            uses: actions/setup-python@v4
+            uses: 'actions/setup-python@v6'
             with:
-              python-version: '3.10'
-              cache: pip
+              python-version-file: "pyproject.toml"
+          - name: Install uv
+            uses: astral-sh/setup-uv@v7
+            with:
+              version: "0.9.17"
+              enable-cache: true
           - name: Build python package
             run: |
-              python --version ; pip --version  # For debugging
-              pip install virtualenv
-              virtualenv venv
-              source venv/bin/activate
-              python -m pip install --upgrade twine build
-              python -m build
-          - name: Publish package to Gitea Package Registry
-            uses: pypa/gh-action-pypi-publish@v1.10.1
+              uv venv
+              source .venv/bin/activate
+              uv build
+          - name: Test python package
+            id: test
+            run: |
+              source .venv/bin/activate
+              uv pip install -e ".[dev]"
+              uv run pytest tests/
+
+              echo "REGISTRY=${GITHUB_SERVER_URL#https://}" >> $GITHUB_ENV
+              echo "UV_PUBLISH_USERNAME=${{ github.repository_owner }}" >> $GITHUB_ENV
+              PUBLISH_CHECK_URL="${{ github.server_url }}"
+              USERNAME="${{ github.repository_owner }}"
+              echo "UV_PUBLISH_CHECK_URL=https://${USERNAME,,}:${{ secrets.REGISTRY_TOKEN }}@${PUBLISH_CHECK_URL#https://}/api/packages/${{ github.repository_owner }}/pypi/simple" >> $GITHUB_ENV
+              echo "UV_PUBLISH_URL=${{ github.server_url }}/api/packages/${{ github.repository_owner }}/pypi" >> $GITHUB_ENV
+          - name: Publish package to Gitea Package Registry with UV
+            run: |
+              source .venv/bin/activate
+              # Configure UV for Gitea Package Registry https://docs.astral.sh/uv/reference/environment/#uv_publish_url
+              export UV_PUBLISH_PASSWORD="${{ secrets.REGISTRY_TOKEN }}"
+              export UV_INSECURE_NO_ZIP_VALIDATION="true"
+              uv publish
+      build-and-push:
+        runs-on: ubuntu-latest
+        needs: python-test
+        permissions:
+          id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
+          contents: read
+          packages: write
+          security-events: write
+          actions: read  # Required for CodeQL upload-sarif action
+          checks: write  # Required for publishing test results
+          pull-requests: write  # Required for PR comments
+        steps:
+          - name: Checkout code
+            uses: 'actions/checkout@v6'
             with:
-              verbose: true
-              skip-existing: true
-              user: ${{ github.repository_owner }}
-              password: ${{ secrets.REGISTRY_TOKEN }}
-              repository-url: https://gitea.dxas90.work/api/packages/${{ github.repository_owner }}/pypi
-          - name: Docker meta
+              fetch-tags: true
+              fetch-depth: 0
+          - name: Set up QEMU
+            uses: 'docker/setup-qemu-action@v3'
+          - name: Set up Docker Buildx
+            uses: 'docker/setup-buildx-action@v3'
+            with:
+              install: true
+              use: true
+              name: ci-builder
+          - name: Set up Python
+            uses: 'actions/setup-python@v6'
+            with:
+              python-version-file: "pyproject.toml"
+          - name: Install uv
+            uses: astral-sh/setup-uv@v7
+            with:
+              version: "0.9.17"
+              enable-cache: true
+          - name: Login to Gitea Container Registry
+            uses: 'docker/login-action@v3'
+            with:
+              registry: ${{ github.server_url }}
+              username: '${{ github.repository_owner }}'
+              password: '${{ secrets.REGISTRY_TOKEN }}'
+          - name: Set Env Variables
+            run: |
+              uv venv
+              source .venv/bin/activate
+              uv pip install -e "."
+              echo "REGISTRY=${GITHUB_SERVER_URL#https://}" >> $GITHUB_ENV
+              echo "VCS_VERSION=$(python -c 'from notify_bot._version import __version__; print(__version__)')" >> $GITHUB_ENV
+              echo "REPO_OWNER=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          - name: Extract metadata
             id: meta
             uses: docker/metadata-action@v5
             with:
-              # list of Docker images to use as base name for tags
-              images: |
-                gitea.dxas90.work/${{ github.repository_owner }}/${{ env.IMAGE_NAME}}
-              # generate Docker tags based on the following events/attributes
+              images: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}
               tags: |
-                type=schedule
                 type=ref,event=branch
                 type=ref,event=pr
                 type=semver,pattern={{version}}
                 type=semver,pattern={{major}}.{{minor}}
-                type=semver,pattern={{major}}
-                type=sha
-          - name: Login to Gitea Container Registry
-            uses: docker/login-action@v3
-            with:
-              registry: gitea.dxas90.work
-              username: '${{ github.repository_owner }}'
-              password: '${{ secrets.REGISTRY_TOKEN }}'
-          - name: Login to Docker Hub
-            uses: docker/login-action@v3
-            with:
-              username: '${{ github.repository_owner }}'
-              password: ${{ secrets.DOCKERHUB_TOKEN }}
-          - name: Build Docker image
+                type=sha,prefix=sha-
+                type=raw,value=latest,enable={{is_default_branch}}
+                type=raw,${{ env.VCS_VERSION }},prefix=vcs
+          - name: Build and push Docker image
+            id: build
             uses: docker/build-push-action@v6
             with:
               context: .
-              platforms: linux/amd64
-              push: true
+              platforms: linux/amd64,linux/arm64
+              push: ${{ github.event_name != 'pull_request' }}
               tags: ${{ steps.meta.outputs.tags }}
               labels: ${{ steps.meta.outputs.labels }}
-              annotations: ${{ steps.meta.outputs.annotations }}
+              target: production
+              cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}:buildcache
+              cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
               build-args: |
-                COMMIT_HASH=${{ github.sha }}
-                CREATED="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-                GH_ACCESS_TOKEN=${{ secrets.REGISTRY_TOKEN }}
-              secrets: |
-                GIT_AUTH_TOKEN=${{ secrets.REGISTRY_TOKEN }}
-              env:
-                SOURCE_DATE_EPOCH=${{ env.TIMESTAMP }}
+                BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+                VCS_REF=${{ github.sha }}
+                VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}

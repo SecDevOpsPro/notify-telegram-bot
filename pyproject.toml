@@ -1,7 +1,6 @@
 [build-system]
-# https://setuptools.pypa.io/en/latest/build_meta.html
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 # https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html
@@ -10,8 +9,8 @@ version = "0.1.0"
 description = "Personal telegram Bot."
 readme = "README.md"
 authors = [{ name = "Daniel Ramirez", email = "dxas90@gmail.com" }]
-
-requires-python = ">=3.9.0"
+requires-python = ">=3.12"
+license = { text = "MIT" }
 
 dependencies = [
   "anyio==4.12.1",
@@ -31,11 +30,62 @@ dependencies = [
   "urllib3==2.6.3",
 ]
 
-[project.optional-dependencies]
-dev = ["black", "httpx", "pytest", "pytest-cov"]
+[tool.hatch.version]
+source = "vcs"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["notify_bot"]
-exclude = ["tests"]
+[tool.hatch.version.raw-options]
+version_scheme = "python-simplified-semver"
+local_scheme = "no-local-version"
+git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "v*"]
 
+[tool.hatch.build.hooks.vcs]
+version-file = "notify_bot/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["notify_bot"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.github",
+    "/docs",
+    "/tests",
+    "/.git",
+    "/.gitignore",
+    "/.dockerignore",
+    "/.env.example",
+    "/Dockerfile",
+    "/mise.toml",
+    "/renovate.json5",
+    "/uv.lock",
+    "*.db",
+    "*.db-*",
+    "__pycache__",
+    "*.pyc",
+    ".pytest_cache",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py312']
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+asyncio_mode = "auto"

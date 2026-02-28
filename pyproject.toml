@@ -13,21 +13,32 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 
 dependencies = [
+  # Async SQLite
+  "aiosqlite>=0.20",
+  # Async HTTP client (replaces requests — avoids blocking the event loop)
+  "httpx[http2]>=0.28",
+  # Templating
+  "jinja2>=3.1",
+  # Telegram bot framework
+  "python-telegram-bot[job-queue]==22.6",
+  # Pinned transitive deps
   "anyio==4.12.1",
   "cachetools==7.0.1",
   "certifi==2025.11.12",
-  "charset-normalizer==3.4.4",
   "h11==0.16.0",
   "h2==4.3.0",
   "hpack==4.1.0",
   "httpcore==1.0.9",
   "hyperframe==6.1.0",
   "idna==3.11",
-  "python-telegram-bot==22.6",
-  "requests==2.32.5",
-  "rfc3986==2.0.0",
   "sniffio==1.3.1",
-  "urllib3==2.6.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "pytest-mock>=3.14",
 ]
 
 [tool.hatch.version]

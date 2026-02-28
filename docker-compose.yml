@@ -17,9 +17,13 @@ services:
     image: notify-tg-bot
     env_file:
       - .env
+    environment:
+      # Required
+      - TOKEN=${TOKEN}
+      - ADMIN_TELEGRAM_ID=${ADMIN_TELEGRAM_ID}
+      # Optional — defaults shown
+      - DATABASE_PATH=${DATABASE_PATH:-/app/data/bot.db}
+      - DAILY_REPORT_TIME=${DAILY_REPORT_TIME:-08:00}
+      - LOGLEVEL=${LOGLEVEL:-INFO}
     volumes:
-      - ./:/app
-  redis_cache:
-    image: redis:alpine@sha256:2afba59292f25f5d1af200496db41bea2c6c816b059f57ae74703a50a03a27d0
-    env_file:
-      - .env
+      - ./data:/app/data   # persists SQLite database between restarts

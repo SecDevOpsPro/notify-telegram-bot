@@ -78,6 +78,7 @@ COPY --from=builder /app/config.json.tpl /app/config.json.tpl
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir /app/dist/*-py3-none-any.whl && \
     chmod +x /app/entrypoint.sh && \
+    mkdir -p /app/data && \
     chown -R appuser:appuser /app && \
     rm -rf /app/dist
 
@@ -91,4 +92,3 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Start the application
 CMD ["python", "-m", "notify_bot.run_bot"]
-

@@ -36,7 +36,7 @@ ASK_NATIONAL_ID, ASK_LICENCE, ASK_PLATE = range(3)
 
 _EGN_RE = re.compile(r"^\d{10}$")
 _LICENCE_RE = re.compile(r"^\d{5,12}$")
-_PLATE_RE = re.compile(r"^[A-Z]{1,3}\d{3,4}[A-Z]{1,3}$", re.IGNORECASE)
+_PLATE_RE = re.compile(r"^[A-Z]{1,3}\d{3,4}[A-Z]{0,3}$", re.IGNORECASE)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

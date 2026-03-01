@@ -8,7 +8,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.cambiocuba.money/api/v1/x-rates-by-date-range"
-_PHOTO_URL = "https://wa.cambiocuba.money/trmi.png?trmi=true&cur={cur}&period={period}"
+_PHOTO_URL = "https://wa.cambiocuba.money/trmi.png?trmi=true&cur={cur}"
 
 _HEADERS = {
     "authority": "api.cambiocuba.money",

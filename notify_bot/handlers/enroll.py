@@ -26,6 +26,9 @@ from telegram.ext import (
 from notify_bot import db
 from notify_bot.middlewares import require_approved
 
+# Exported for run_bot registration
+__all__ = ["build_enroll_handler", "unenroll_command"]
+
 logger = logging.getLogger(__name__)
 
 # ── Conversation states ────────────────────────────────────────────────────────
@@ -178,6 +181,28 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         context.user_data.pop(key, None)
     await update.message.reply_text("Enrollment cancelled.  Your existing data is unchanged.")
     return ConversationHandler.END
+
+
+# ── De-registration ──────────────────────────────────────────────────────────
+
+
+@require_approved
+async def unenroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/unenroll — delete the user's saved profile data."""
+    uid = update.effective_user.id
+    profile = await db.get_profile(uid)
+    if not profile:
+        await update.message.reply_text(
+            "ℹ️ You don't have any saved profile data to remove."
+        )
+        return
+
+    await db.delete_profile(uid)
+    await update.message.reply_text(
+        "🗑️ Your profile data has been deleted.\n"
+        "National ID, driving licence and vehicle plate have been removed.\n\n"
+        "Use /enroll to save new data at any time."
+    )
 
 
 # ── Handler factory ───────────────────────────────────────────────────────────

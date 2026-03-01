@@ -1,33 +1,38 @@
 # syntax=docker/dockerfile:1@sha256:b6afd42430b15f2d2a4c5a02b919e98a525b785b1aaff16747d2f623364e39b6
 
-# Comments are provided throughout this file to help you get started.
-# If you need more help, visit the Dockerfile reference guide at
-# docker buildx build . -f "Dockerfile"  --platform linux/amd64 --no-cache -t workflow --build-arg CREATED="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+# docker buildx build . -f "Dockerfile" --platform linux/amd64 --no-cache -t notify-bot \
+#   --build-arg CREATED="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" --build-arg APP_VERSION=1.0.0
 # https://docs.docker.com/engine/reference/builder/
 
 ARG PYTHON_VERSION=3.12
-FROM python:${PYTHON_VERSION}-slim as builder
 
+# ── Builder stage — install deps with uv ─────────────────────────────────────
+FROM python:${PYTHON_VERSION}-slim AS builder
 
 WORKDIR /app
 
+# Install git + uv; git is needed so hatch-vcs can read a version tag
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir uv
+
+# Copy project files
 COPY . .
 
-RUN pip install --upgrade pip build &&\
-    python -m build
+RUN uv pip install --system --no-cache .
 
-FROM python:${PYTHON_VERSION}-slim as production
+# ── Production stage ──────────────────────────────────────────────────────────
+FROM python:${PYTHON_VERSION}-slim AS production
 
+# Re-declare so it is usable in COPY --from paths below
+ARG PYTHON_VERSION=3.12
 ARG COMMIT_HASH="d3faul7"
 ARG APP_PORT=8000
 ARG CREATED="0000-00-00T00:00:00Z"
 
-# Set environment variables
 ENV COMMIT_HASH=${COMMIT_HASH} \
-    # Keeps Python from buffering stdout and stderr to avoid situations where
-    # the application crashes without emitting any logs due to buffering.
     PYTHONUNBUFFERED=1 \
-    # Prevents Python from writing pyc files.
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     APP_PORT=${APP_PORT} \
@@ -45,10 +50,8 @@ LABEL org.opencontainers.image.authors="Daniel Ramirez <dxas90@gmail.com>" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.source=https://github.com/dxas90/notify_bot \
     org.opencontainers.image.title="telegram Bot" \
-    org.opencontainers.image.version="1.0.0"
+    org.opencontainers.image.version=${COMMIT_HASH}
 
-# Create a non-privileged user that the app will run under.
-# See https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#user
 ARG UID=10001
 RUN adduser \
     --disabled-password \
@@ -60,35 +63,32 @@ RUN adduser \
     appuser
 
 RUN set -eux; \
-    apt update && \
-    apt install -y --no-install-recommends --no-install-suggests gettext-base bash && apt clean && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends --no-install-suggests gettext-base bash && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Copy the source code into the container.
-COPY --from=builder /app/dist /app/dist
-COPY --from=builder /app/entrypoint.sh /app/entrypoint.sh
-COPY --from=builder /app/config.json.tpl /app/config.json.tpl
+# Copy installed packages and scripts from the builder
+COPY --from=builder /usr/local/lib/python${PYTHON_VERSION}/site-packages \
+                    /usr/local/lib/python${PYTHON_VERSION}/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Download dependencies as a separate step to take advantage of Docker's caching.
-# Leverage a cache mount to /root/.cache/pip to speed up subsequent builds.
-# Leverage a bind mount to requirements.txt to avoid having to copy them into
-# into this layer.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir /app/dist/*-py3-none-any.whl && \
-    chmod +x /app/entrypoint.sh && \
+# Copy application support files
+COPY --chown=appuser:appuser entrypoint.sh ./
+COPY --chown=appuser:appuser config.json.tpl ./
+
+RUN chmod +x /app/entrypoint.sh && \
     mkdir -p /app/data && \
-    chown -R appuser:appuser /app && \
-    rm -rf /app/dist
+    chown -R appuser:appuser /app
 
-# Switch to the non-privileged user to run the application.
 USER appuser
 
-# Expose the port that the application listens on.
 EXPOSE ${APP_PORT}
+
+VOLUME ["/app/data"]
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 
-# Start the application
 CMD ["python", "-m", "notify_bot.run_bot"]

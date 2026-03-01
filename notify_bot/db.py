@@ -170,6 +170,15 @@ async def upsert_profile(
         await db.commit()
 
 
+async def delete_profile(user_id: int) -> None:
+    """Remove a user's saved profile (national_id, licence, plate)."""
+    async with aiosqlite.connect(_db_path()) as db:
+        await db.execute(
+            "DELETE FROM user_profiles WHERE user_id = ?", (user_id,)
+        )
+        await db.commit()
+
+
 # ── Scheduler helpers ─────────────────────────────────────────────────────────
 
 

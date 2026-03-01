@@ -21,6 +21,7 @@ _HELP_PUBLIC = """
 
 <b>After approval:</b>
 /enroll   — Save your personal data (ID, licence, plate)
+/unenroll — Delete your saved profile data
 /driver   — Check driving licence obligations (MVR)
 /plate    — Check vehicle obligations (MVR)
 /vignette — Check road e-vignette (bgtoll.bg) — also: /vignette &lt;plate&gt;

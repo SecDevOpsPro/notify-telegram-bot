@@ -13,12 +13,13 @@ import logging
 import os
 import pathlib
 
+from telegram import BotCommand
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
 from notify_bot import config, db
 from notify_bot.handlers.admin import approval_callback, approve_cmd, deny_cmd, pending_cmd, users_cmd
 from notify_bot.handlers.common import help_command, request_access, start
-from notify_bot.handlers.enroll import build_enroll_handler
+from notify_bot.handlers.enroll import build_enroll_handler, unenroll_command
 from notify_bot.handlers.eur import eur_command
 from notify_bot.handlers.obligations import (
     clamp_command,
@@ -47,6 +48,22 @@ async def _post_init(application: Application) -> None:
 
     await db.init_db()
     logger.info("Database initialised at %s", config.DATABASE_PATH)
+
+    # Register commands so the Telegram menu (/) shows them all
+    await application.bot.set_my_commands([
+        BotCommand("start",    "Welcome message"),
+        BotCommand("help",     "Show all available commands"),
+        BotCommand("request",  "Ask the admin for access"),
+        BotCommand("change",   "EUR exchange rates (Cuba)"),
+        BotCommand("enroll",   "Save your personal data"),
+        BotCommand("unenroll", "Delete your saved profile data"),
+        BotCommand("driver",   "Check driving licence obligations (MVR)"),
+        BotCommand("plate",    "Check vehicle obligations (MVR)"),
+        BotCommand("vignette", "Check road e-vignette (bgtoll.bg)"),
+        BotCommand("sticker",  "Check Sofia parking sticker"),
+        BotCommand("clamp",    "Check wheel-clamp status"),
+    ])
+    logger.info("Bot commands menu updated")
 
     job_queue = application.job_queue
     if job_queue:
@@ -90,6 +107,7 @@ def run_bot() -> None:
 
     # ── Feature commands ──────────────────────────────────────────────────────
     application.add_handler(CommandHandler("change", eur_command))
+    application.add_handler(CommandHandler("unenroll", unenroll_command))
     application.add_handler(CommandHandler("driver", driver_command))
     application.add_handler(CommandHandler("plate", plate_command))
     application.add_handler(CommandHandler("vignette", vignette_command))

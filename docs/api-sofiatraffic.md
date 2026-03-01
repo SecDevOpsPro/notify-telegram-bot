@@ -36,6 +36,7 @@ GET https://www.sofiatraffic.bg/bg/parking/sticker/{plate}
 ### Response examples
 
 **Sticker found:**
+
 ```json
 {
   "sticker": {
@@ -50,6 +51,7 @@ GET https://www.sofiatraffic.bg/bg/parking/sticker/{plate}
 ```
 
 **No sticker:**
+
 ```json
 {
   "sticker": null
@@ -59,7 +61,7 @@ GET https://www.sofiatraffic.bg/bg/parking/sticker/{plate}
 ### HTTP status codes
 
 | Code | Meaning |
-|---|---|
+| --- | --- |
 | `200` | Request processed; check payload for sticker presence |
 | `404` | Plate not found / no sticker |
 | `403` / `503` | Cloudflare bot-detection challenge |
@@ -72,7 +74,7 @@ Check whether a vehicle is currently **wheel-clamped** in Sofia.
 
 ### Request
 
-```
+```text
 GET https://www.sofiatraffic.bg/bg/parking/clamp/{plate}
 ```
 
@@ -81,6 +83,7 @@ Headers are identical to the sticker endpoint above.
 ### Response examples
 
 **Vehicle clamped:**
+
 ```json
 {
   "clamp": {
@@ -94,6 +97,7 @@ Headers are identical to the sticker endpoint above.
 ```
 
 **Not clamped:**
+
 ```json
 {
   "clamp": null
@@ -103,7 +107,7 @@ Headers are identical to the sticker endpoint above.
 ### HTTP status codes
 
 | Code | Meaning |
-|---|---|
+| --- | --- |
 | `200` | Request processed; check `clamped` field |
 | `404` | Plate not found (treat as not clamped) |
 | `403` / `503` | Cloudflare bot-detection challenge |
@@ -138,7 +142,7 @@ sequenceDiagram
 ## Bot Commands
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `/sticker` | Check parking sticker using enrolled plate |
 | `/sticker CB1234AB` | Check parking sticker for a specific plate |
 | `/clamp` | Check wheel-clamp status using enrolled plate |
@@ -154,7 +158,7 @@ The plate argument takes precedence over the enrolled plate.
 **`notify_bot/services/sofiatraffic.py`**
 
 | Symbol | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `SofiaTrafficError` | Exception | Base exception |
 | `CloudflareError` | Exception | Cloudflare 403/503 challenge |
 | `CsrfFetchError` | Exception | Could not obtain XSRF-TOKEN |

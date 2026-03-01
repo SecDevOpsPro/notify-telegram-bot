@@ -43,11 +43,6 @@ _OBLIGATIONS_TEMPLATE = Template(
 {% endif %}{% endfor %}"""
 )
 
-_DRIVER_PHOTO = (
-    "https://icon-library.com/images/drivers-license-icon/drivers-license-icon-26.jpg"
-)
-
-
 def _render(units: list[Obligation]) -> str:
     return _OBLIGATIONS_TEMPLATE.render(units=units)
 
@@ -77,7 +72,6 @@ async def driver_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"⚠️ MVR API error: {exc}")
         return
 
-    await update.message.reply_photo(photo=_DRIVER_PHOTO)
     await update.message.reply_html(_render(units))
 
 
@@ -132,7 +126,8 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     status_icon = "✅" if info.is_valid else "❌"
-    lines = [f"🛣️ <b>Vignette for {plate}</b>", f"{status_icon} Status: {info.status or 'N/A'}"]
+    status_label = "Active" if info.is_valid else "Inactive"
+    lines = [f"🛣️ <b>Vignette for {plate}</b>", f"{status_icon} Status: {status_label}"]
     if info.validity_date_from:
         lines.append(f"📅 Valid: {info.validity_date_from} → {info.validity_date_to}")
     if info.vignette_type:

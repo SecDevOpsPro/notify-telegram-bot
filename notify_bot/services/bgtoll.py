@@ -80,15 +80,18 @@ class VignetteInfo:
     emission_class: str | None = None
     vehicle_type: str | None = None
     status: str | None = None
+    status_boolean: bool | None = None
 
     # Raw payload for forward-compatibility
     raw: dict = field(default_factory=dict, compare=False, repr=False)
 
     @property
     def is_valid(self) -> bool:
-        """True if the vignette status is reported as active/valid."""
+        """True if the vignette is active.  Prefers the unambiguous statusBoolean field."""
         if not self.found:
             return False
+        if self.status_boolean is not None:
+            return self.status_boolean
         s = (self.status or "").upper()
         return s in {"VALID", "ACTIVE", "OK"}
 
@@ -121,21 +124,25 @@ def _parse(plate: str, country: str, data: dict) -> VignetteInfo:
                 return str(v)
         return None
 
+    # Prefer the pre-formatted date strings for display; fall back to ISO dates
+    status_bool_raw = payload.get("statusBoolean")
+
     return VignetteInfo(
         plate=plate,
         country=country,
         found=True,
-        vignette_series=_get("vignetteSeries", "series", "id"),
+        vignette_series=_get("vignetteNumber", "vignetteSeries", "series", "id"),
         validity_date_from=_get(
-            "validityDateFrom", "validFrom", "from", "startDate", "dateFrom"
+            "validityDateFromFormated", "validityDateFrom", "validFrom", "from", "startDate", "dateFrom"
         ),
         validity_date_to=_get(
-            "validityDateTo", "validTo", "to", "endDate", "dateTo"
+            "validityDateToFormated", "validityDateTo", "validTo", "to", "endDate", "dateTo"
         ),
         vignette_type=_get("vignetteType", "type", "category"),
-        emission_class=_get("emissionClass", "emission", "euroClass"),
-        vehicle_type=_get("vehicleType", "vehicle", "vehicleCategory"),
+        emission_class=_get("emissionsClass", "emissionClass", "emission", "euroClass"),
+        vehicle_type=_get("vehicleType", "vehicleTypeCode", "vehicle", "vehicleCategory"),
         status=_get("status", "vignetteStatus", "state"),
+        status_boolean=bool(status_bool_raw) if status_bool_raw is not None else None,
         raw=data,
     )
 

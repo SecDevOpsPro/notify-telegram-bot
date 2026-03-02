@@ -1,6 +1,7 @@
 """
 Tests for notify_bot.services.sofiatraffic
 """
+
 from __future__ import annotations
 
 import json
@@ -85,7 +86,7 @@ class TestStickerIsValid:
             ("ACTIVE_STICKER", True),
             ("EXPIRED", False),
             ("INVALID", False),
-            (None, True),   # found but no status → treated as valid
+            (None, True),  # found but no status → treated as valid
         ],
     )
     def test_status_variants(self, status, expected):
@@ -158,7 +159,9 @@ class TestParseClamp:
 
 def _make_response(status_code: int, body: dict | None = None) -> httpx.Response:
     content = json.dumps(body or {}).encode()
-    resp = httpx.Response(status_code, content=content, headers={"Content-Type": "application/json"})
+    resp = httpx.Response(
+        status_code, content=content, headers={"Content-Type": "application/json"}
+    )
     resp.request = httpx.Request("GET", "https://www.sofiatraffic.bg/bg/parking/sticker/TEST")
     return resp
 
@@ -177,10 +180,11 @@ def _mock_csrf_client(sticker_response: httpx.Response):
 class TestCheckSticker:
     async def test_found_sticker(self):
         resp = _make_response(200, {"sticker": {"status": "VALID", "zone": "blue"}})
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             result = await check_sticker("cb1234ab")
         assert result.plate == "CB1234AB"
         assert result.found is True
@@ -188,47 +192,52 @@ class TestCheckSticker:
 
     async def test_404_returns_not_found(self):
         resp = _make_response(404)
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             result = await check_sticker("CB1234AB")
         assert result.found is False
 
     async def test_cloudflare_403_raises(self):
         resp = _make_response(403)
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             with pytest.raises(CloudflareError):
                 await check_sticker("CB1234AB")
 
     async def test_cloudflare_503_raises(self):
         resp = _make_response(503)
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             with pytest.raises(CloudflareError):
                 await check_sticker("CB1234AB")
 
     async def test_non_json_raises(self):
         resp = httpx.Response(200, content=b"not json", headers={"Content-Type": "text/html"})
         resp.request = httpx.Request("GET", "https://www.sofiatraffic.bg/bg/parking/sticker/TEST")
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             with pytest.raises(SofiaTrafficError, match="non-JSON"):
                 await check_sticker("CB1234AB")
 
     async def test_plate_uppercased(self):
         resp = _make_response(200, {"sticker": None})
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             result = await check_sticker("aa1234bb")
         assert result.plate == "AA1234BB"
 
@@ -239,10 +248,11 @@ class TestCheckSticker:
 class TestCheckClamp:
     async def test_clamped_vehicle(self):
         resp = _make_response(200, {"clamp": {"clamped": True, "clampedAt": "2026-02-28 09:00"}})
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             result = await check_clamp("CB1234AB")
         assert result.found is True
         assert result.clamped is True
@@ -250,38 +260,42 @@ class TestCheckClamp:
 
     async def test_not_clamped_null(self):
         resp = _make_response(200, {"clamp": None})
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             result = await check_clamp("CB1234AB")
         assert result.found is False
         assert result.clamped is False
 
     async def test_404_returns_not_found(self):
         resp = _make_response(404)
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             result = await check_clamp("CB1234AB")
         assert result.found is False
 
     async def test_cloudflare_raises(self):
         resp = _make_response(403)
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             with pytest.raises(CloudflareError):
                 await check_clamp("CB1234AB")
 
     async def test_plate_uppercased(self):
         resp = _make_response(200, {"clamp": None})
-        with patch("notify_bot.services.sofiatraffic._get_csrf_client",
-                   new_callable=AsyncMock,
-                   return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()),
-                                 "token")):
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
             result = await check_clamp("aa1234bb")
         assert result.plate == "AA1234BB"
 

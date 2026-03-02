@@ -1,4 +1,5 @@
 """Tests for the @require_approved auth middleware (notify_bot/middlewares.py)."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch

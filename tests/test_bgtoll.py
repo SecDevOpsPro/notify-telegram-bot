@@ -1,4 +1,5 @@
 """Tests for the bgtoll.bg e-vignette service (notify_bot/services/bgtoll.py)."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -84,15 +85,18 @@ def test_parse_plate_and_country_preserved():
 # ── VignetteInfo.is_valid ────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("status,expected", [
-    ("VALID", True),
-    ("valid", True),
-    ("ACTIVE", True),
-    ("OK", True),
-    ("EXPIRED", False),
-    ("INVALID", False),
-    (None, False),
-])
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        ("VALID", True),
+        ("valid", True),
+        ("ACTIVE", True),
+        ("OK", True),
+        ("EXPIRED", False),
+        ("INVALID", False),
+        (None, False),
+    ],
+)
 def test_vignette_info_is_valid(status, expected):
     info = VignetteInfo(plate="X", country="BG", found=True, status=status)
     assert info.is_valid is expected
@@ -114,7 +118,9 @@ def _mock_client(status_code: int, json_data: dict | None = None, raise_exc=None
         mock_resp.json.return_value = json_data
     mock_resp.raise_for_status = MagicMock()
 
-    mock_get = AsyncMock(return_value=mock_resp) if not raise_exc else AsyncMock(side_effect=raise_exc)
+    mock_get = (
+        AsyncMock(return_value=mock_resp) if not raise_exc else AsyncMock(side_effect=raise_exc)
+    )
     mock_client_instance = MagicMock(get=mock_get)
 
     mock_ctx = MagicMock()
@@ -134,7 +140,9 @@ async def test_check_vignette_success():
             "validityDateTo": "2025-12-31",
         }
     }
-    with patch("notify_bot.services.bgtoll.httpx.AsyncClient", return_value=_mock_client(200, payload)):
+    with patch(
+        "notify_bot.services.bgtoll.httpx.AsyncClient", return_value=_mock_client(200, payload)
+    ):
         result = await check_vignette("CB1234AB")
 
     assert result.found is True
@@ -147,7 +155,9 @@ async def test_check_vignette_success():
 @pytest.mark.asyncio
 async def test_check_vignette_plate_uppercased():
     payload = {"vignette": {"status": "VALID"}}
-    with patch("notify_bot.services.bgtoll.httpx.AsyncClient", return_value=_mock_client(200, payload)):
+    with patch(
+        "notify_bot.services.bgtoll.httpx.AsyncClient", return_value=_mock_client(200, payload)
+    ):
         result = await check_vignette("cb1234ab")
     assert result.plate == "CB1234AB"
 
@@ -193,9 +203,7 @@ async def test_check_vignette_non_json_raises_bgtoll_error():
     mock_resp.raise_for_status = MagicMock()
 
     mock_ctx = MagicMock()
-    mock_ctx.__aenter__ = AsyncMock(
-        return_value=MagicMock(get=AsyncMock(return_value=mock_resp))
-    )
+    mock_ctx.__aenter__ = AsyncMock(return_value=MagicMock(get=AsyncMock(return_value=mock_resp)))
     mock_ctx.__aexit__ = AsyncMock(return_value=False)
 
     with patch("notify_bot.services.bgtoll.httpx.AsyncClient", return_value=mock_ctx):

@@ -8,6 +8,7 @@ The bgtoll.bg site is behind Cloudflare.  Requests from a server IP may receive
 a 403 / Cloudflare challenge response.  The :class:`CloudflareBlockedError`
 exception is raised in that case so callers can present a user-friendly message.
 """
+
 from __future__ import annotations
 
 import logging
@@ -133,7 +134,12 @@ def _parse(plate: str, country: str, data: dict) -> VignetteInfo:
         found=True,
         vignette_series=_get("vignetteNumber", "vignetteSeries", "series", "id"),
         validity_date_from=_get(
-            "validityDateFromFormated", "validityDateFrom", "validFrom", "from", "startDate", "dateFrom"
+            "validityDateFromFormated",
+            "validityDateFrom",
+            "validFrom",
+            "from",
+            "startDate",
+            "dateFrom",
         ),
         validity_date_to=_get(
             "validityDateToFormated", "validityDateTo", "validTo", "to", "endDate", "dateTo"

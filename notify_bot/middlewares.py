@@ -1,4 +1,5 @@
 """Auth middleware — decorator that gates handlers to approved users only."""
+
 from __future__ import annotations
 
 import functools

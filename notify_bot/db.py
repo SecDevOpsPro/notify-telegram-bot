@@ -1,4 +1,5 @@
 """Async SQLite database layer — users and per-user profiles."""
+
 from __future__ import annotations
 
 import os
@@ -42,6 +43,7 @@ def _now() -> str:
 def _db_path() -> str:
     """Re-read at call time so tests can monkeypatch the module attribute."""
     import notify_bot.db as _self
+
     return _self.DATABASE_PATH
 
 
@@ -82,9 +84,7 @@ async def upsert_user(
 async def get_user(user_id: int) -> Optional[dict]:
     async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM users WHERE user_id = ?", (user_id,)
-        ) as cur:
+        async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
@@ -92,18 +92,14 @@ async def get_user(user_id: int) -> Optional[dict]:
 async def set_user_status(user_id: int, status: str) -> None:
     """Update a user's approval status ('pending' | 'approved' | 'denied')."""
     async with aiosqlite.connect(_db_path()) as db:
-        await db.execute(
-            "UPDATE users SET status = ? WHERE user_id = ?", (status, user_id)
-        )
+        await db.execute("UPDATE users SET status = ? WHERE user_id = ?", (status, user_id))
         await db.commit()
 
 
 async def list_users_by_status(status: str) -> list[dict]:
     async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM users WHERE status = ?", (status,)
-        ) as cur:
+        async with db.execute("SELECT * FROM users WHERE status = ?", (status,)) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -114,9 +110,7 @@ async def list_users_by_status(status: str) -> list[dict]:
 async def get_profile(user_id: int) -> Optional[dict]:
     async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM user_profiles WHERE user_id = ?", (user_id,)
-        ) as cur:
+        async with db.execute("SELECT * FROM user_profiles WHERE user_id = ?", (user_id,)) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
@@ -164,18 +158,14 @@ async def upsert_profile(
     values = list(updates.values()) + [user_id]
 
     async with aiosqlite.connect(_db_path()) as db:
-        await db.execute(
-            f"UPDATE user_profiles SET {set_clause} WHERE user_id = ?", values
-        )
+        await db.execute(f"UPDATE user_profiles SET {set_clause} WHERE user_id = ?", values)
         await db.commit()
 
 
 async def delete_profile(user_id: int) -> None:
     """Remove a user's saved profile (national_id, licence, plate)."""
     async with aiosqlite.connect(_db_path()) as db:
-        await db.execute(
-            "DELETE FROM user_profiles WHERE user_id = ?", (user_id,)
-        )
+        await db.execute("DELETE FROM user_profiles WHERE user_id = ?", (user_id,))
         await db.commit()
 
 

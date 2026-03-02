@@ -1,4 +1,5 @@
 """Tests for the MVR obligations service (notify_bot/services/mvr.py)."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -6,7 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from notify_bot.services.mvr import MVRApiError, Obligation, _parse, check_by_licence, check_by_plate
+from notify_bot.services.mvr import (
+    MVRApiError,
+    Obligation,
+    _parse,
+    check_by_licence,
+    check_by_plate,
+)
 
 
 # ── _parse (pure function) ────────────────────────────────────────────────────
@@ -90,9 +97,7 @@ async def test_check_by_licence_success():
 async def test_check_by_licence_http_error():
     with patch("notify_bot.services.mvr.httpx.AsyncClient") as MockClient:
         MockClient.return_value.__aenter__ = AsyncMock(
-            return_value=MagicMock(
-                get=AsyncMock(side_effect=httpx.HTTPError("connection failed"))
-            )
+            return_value=MagicMock(get=AsyncMock(side_effect=httpx.HTTPError("connection failed")))
         )
         MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 

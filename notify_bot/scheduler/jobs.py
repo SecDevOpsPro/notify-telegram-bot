@@ -8,6 +8,7 @@ Scheduled job definitions.
 It iterates every approved user who has at least one profile field set and sends
 them a personalized obligations report.
 """
+
 from __future__ import annotations
 
 import logging
@@ -86,15 +87,14 @@ async def daily_obligations_report(context: ContextTypes.DEFAULT_TYPE) -> None:
                         f"{status_icon} Status: {vignette.status or 'N/A'}",
                     ]
                     if vignette.validity_date_from:
-                        vignette_lines.append(f"📅 Valid: {vignette.validity_date_from} → {vignette.validity_date_to}")
+                        vignette_lines.append(
+                            f"📅 Valid: {vignette.validity_date_from} → {vignette.validity_date_to}"
+                        )
                     if vignette.vignette_type:
                         vignette_lines.append(f"📋 Type: {vignette.vignette_type}")
                     sections.append("\n".join(vignette_lines))
                 else:
-                    sections.append(
-                        f"🛣️ <b>Vignette ({plate}):</b>\n"
-                        "❌ No active vignette found."
-                    )
+                    sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
             except CloudflareBlockedError:
                 # CF challenge — skip silently in scheduled context, don't spam users
                 logger.debug("Vignette check skipped for user %s — Cloudflare blocked", uid)
@@ -115,8 +115,7 @@ async def daily_obligations_report(context: ContextTypes.DEFAULT_TYPE) -> None:
                     sections.append("\n".join(sticker_lines))
                 else:
                     sections.append(
-                        f"🅿️ <b>Parking sticker ({plate}):</b>\n"
-                        "❌ No active parking sticker found."
+                        f"🅿️ <b>Parking sticker ({plate}):</b>\n❌ No active parking sticker found."
                     )
             except SofiaCloudflareError:
                 logger.debug("Sticker check skipped for user %s — Cloudflare blocked", uid)

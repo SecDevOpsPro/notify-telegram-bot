@@ -5,6 +5,7 @@ Two lookup modes are supported:
 - By driving licence number (``check_by_licence``)
 - By vehicle plate number  (``check_by_plate``)
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,9 +19,7 @@ logger = logging.getLogger(__name__)
 _BASE_URL = "https://e-uslugi.mvr.bg/api/Obligations/AND"
 
 _HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0"
-    ),
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
     "Accept": "*/*",
     "Accept-Language": "en",
     "Referer": "https://e-uslugi.mvr.bg/en/services/obligations",
@@ -31,9 +30,15 @@ _HEADERS = {
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-origin",
+    "pragma": "no-cache",
+    "dnt": "1",
+    "cache-control": "no-cache",
 }
 
-_COOKIES = {"currentLang": "en"}
+_COOKIES = {
+    "EAUSessionID": "b5345242-002d-4cca-878a-991c3db0cf0e",
+    "currentLang": "en",
+}
 
 #: Maps ``unitGroup`` integer values to human-readable law descriptions.
 LAW_MAP: dict[int, str] = {
@@ -69,10 +74,8 @@ class MVRApiError(Exception):
 
 
 async def _fetch(params: dict[str, str]) -> dict:
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.get(
-            _BASE_URL, params=params, headers=_HEADERS, cookies=_COOKIES
-        )
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.get(_BASE_URL, params=params, headers=_HEADERS, cookies=_COOKIES)
         resp.raise_for_status()
         return resp.json()
 
@@ -114,9 +117,7 @@ async def check_by_licence(national_id: str, licence_number: str) -> list[Obliga
     try:
         data = await _fetch(params)
     except httpx.HTTPStatusError as exc:
-        raise MVRApiError(
-            f"MVR API returned HTTP {exc.response.status_code}"
-        ) from exc
+        raise MVRApiError(f"MVR API returned HTTP {exc.response.status_code}") from exc
     except httpx.HTTPError as exc:
         raise MVRApiError(f"MVR API connection error: {exc}") from exc
 
@@ -147,9 +148,7 @@ async def check_by_plate(national_id: str, plate_number: str) -> list[Obligation
     try:
         data = await _fetch(params)
     except httpx.HTTPStatusError as exc:
-        raise MVRApiError(
-            f"MVR API returned HTTP {exc.response.status_code}"
-        ) from exc
+        raise MVRApiError(f"MVR API returned HTTP {exc.response.status_code}") from exc
     except httpx.HTTPError as exc:
         raise MVRApiError(f"MVR API connection error: {exc}") from exc
 

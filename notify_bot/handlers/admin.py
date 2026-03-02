@@ -11,6 +11,7 @@ Inline callbacks:
     approve:<user_id>    — sent via the access-request notification
     deny:<user_id>       — sent via the access-request notification
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,10 +55,11 @@ async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     await db.set_user_status(target_id, "approved")
-    await update.message.reply_text(f"✅ User <code>{target_id}</code> approved.", parse_mode="HTML")
+    await update.message.reply_text(
+        f"✅ User <code>{target_id}</code> approved.", parse_mode="HTML"
+    )
     await _notify_user(
-        context, target_id,
-        "✅ Your access has been approved!  Use /help to get started."
+        context, target_id, "✅ Your access has been approved!  Use /help to get started."
     )
 
 
@@ -92,13 +94,11 @@ async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     lines = [
-        f"• {u['first_name']} (@{u.get('username') or 'N/A'}) — "
-        f"<code>{u['user_id']}</code>"
+        f"• {u['first_name']} (@{u.get('username') or 'N/A'}) — <code>{u['user_id']}</code>"
         for u in users
     ]
     await update.message.reply_html(
-        "⏳ <b>Pending requests</b> (/approve &lt;id&gt; to approve):\n\n"
-        + "\n".join(lines)
+        "⏳ <b>Pending requests</b> (/approve &lt;id&gt; to approve):\n\n" + "\n".join(lines)
     )
 
 
@@ -113,8 +113,7 @@ async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     lines = [
-        f"• {u['first_name']} (@{u.get('username') or 'N/A'}) — "
-        f"<code>{u['user_id']}</code>"
+        f"• {u['first_name']} (@{u.get('username') or 'N/A'}) — <code>{u['user_id']}</code>"
         for u in users
     ]
     await update.message.reply_html("✅ <b>Approved users:</b>\n\n" + "\n".join(lines))
@@ -141,14 +140,17 @@ async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if action == "approve":
         await db.set_user_status(target_id, "approved")
-        await query.edit_message_text(f"✅ Approved user <code>{target_id}</code>.", parse_mode="HTML")
+        await query.edit_message_text(
+            f"✅ Approved user <code>{target_id}</code>.", parse_mode="HTML"
+        )
         await _notify_user(
-            context, target_id,
-            "✅ Your access has been approved!  Use /help to get started."
+            context, target_id, "✅ Your access has been approved!  Use /help to get started."
         )
     elif action == "deny":
         await db.set_user_status(target_id, "denied")
-        await query.edit_message_text(f"❌ Denied user <code>{target_id}</code>.", parse_mode="HTML")
+        await query.edit_message_text(
+            f"❌ Denied user <code>{target_id}</code>.", parse_mode="HTML"
+        )
         await _notify_user(context, target_id, "❌ Your access request was denied.")
     else:
         await query.edit_message_text("⚠️ Unknown action.")

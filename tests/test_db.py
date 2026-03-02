@@ -1,4 +1,5 @@
 """Tests for the async SQLite database layer (notify_bot/db.py)."""
+
 from __future__ import annotations
 
 import pytest

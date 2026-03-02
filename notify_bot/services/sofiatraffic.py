@@ -16,6 +16,7 @@ Like many Bulgarian government services, the site may be behind Cloudflare.
 A :class:`CloudflareError` is raised when a 403 / 503 challenge response is
 detected so callers can present a user-friendly fallback.
 """
+
 from __future__ import annotations
 
 import logging
@@ -155,15 +156,12 @@ def _parse_sticker(plate: str, data: dict) -> StickerInfo:
     if "sticker" in data and data["sticker"] is None:
         return StickerInfo(plate=plate, found=False, raw=data)
 
-    payload: dict = (
-        data.get("sticker")
-        or data.get("stickerData")
-        or data.get("data")
-        or data
-    )
+    payload: dict = data.get("sticker") or data.get("stickerData") or data.get("data") or data
 
-    if not payload or payload is data and not any(
-        k in data for k in ("validFrom", "valid_from", "zone", "status", "plateNumber")
+    if (
+        not payload
+        or payload is data
+        and not any(k in data for k in ("validFrom", "valid_from", "zone", "status", "plateNumber"))
     ):
         return StickerInfo(plate=plate, found=False, raw=data)
 
@@ -196,12 +194,7 @@ def _parse_clamp(plate: str, data: dict) -> ClampInfo:
     if "clamp" in data and data["clamp"] is None:
         return ClampInfo(plate=plate, found=False, clamped=False, raw=data)
 
-    payload: dict = (
-        data.get("clamp")
-        or data.get("clampData")
-        or data.get("data")
-        or {}
-    )
+    payload: dict = data.get("clamp") or data.get("clampData") or data.get("data") or {}
 
     if not payload:
         # Check for a boolean "clamped" field at top level

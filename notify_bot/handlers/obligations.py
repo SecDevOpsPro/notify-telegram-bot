@@ -10,6 +10,7 @@ Obligation check handlers.
 All commands require admin approval.  Plate-based commands require the
 vehicle_plate field to be filled via /enroll (or accept a plate argument).
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,6 +43,7 @@ _OBLIGATIONS_TEMPLATE = Template(
 {% else %}  ✅ No obligations found
 {% endif %}{% endfor %}"""
 )
+
 
 def _render(units: list[Obligation]) -> str:
     return _OBLIGATIONS_TEMPLATE.render(units=units)
@@ -183,13 +185,15 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if not info.found:
         await update.message.reply_html(
-            f"🅿️ <b>Parking sticker for {plate}</b>\n\n"
-            "❌ No active parking sticker found."
+            f"🅿️ <b>Parking sticker for {plate}</b>\n\n❌ No active parking sticker found."
         )
         return
 
     status_icon = "✅" if info.is_valid else "❌"
-    lines = [f"🅿️ <b>Parking sticker for {plate}</b>", f"{status_icon} Status: {info.status or 'Active'}"]
+    lines = [
+        f"🅿️ <b>Parking sticker for {plate}</b>",
+        f"{status_icon} Status: {info.status or 'Active'}",
+    ]
     if info.valid_from:
         lines.append(f"📅 Valid: {info.valid_from} → {info.valid_to}")
     if info.zone:
@@ -245,8 +249,7 @@ async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if not info.found or not info.clamped:
         await update.message.reply_html(
-            f"🔓 <b>Wheel clamp for {plate}</b>\n\n"
-            "✅ Vehicle is <b>not</b> wheel-clamped."
+            f"🔓 <b>Wheel clamp for {plate}</b>\n\n✅ Vehicle is <b>not</b> wheel-clamped."
         )
         return
 

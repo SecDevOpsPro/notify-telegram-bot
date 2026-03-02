@@ -9,6 +9,7 @@ Guides an approved user through saving (or updating) their:
 Each step shows the current stored value and offers /skip to keep it.
 /cancel exits the wizard at any point.
 """
+
 from __future__ import annotations
 
 import logging
@@ -192,9 +193,7 @@ async def unenroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     uid = update.effective_user.id
     profile = await db.get_profile(uid)
     if not profile:
-        await update.message.reply_text(
-            "ℹ️ You don't have any saved profile data to remove."
-        )
+        await update.message.reply_text("ℹ️ You don't have any saved profile data to remove.")
         return
 
     await db.delete_profile(uid)

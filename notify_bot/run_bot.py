@@ -7,6 +7,7 @@ Start with:
 Or via Docker CMD (already configured in Dockerfile):
     CMD ["python", "-m", "notify_bot.run_bot"]
 """
+
 from __future__ import annotations
 
 import logging
@@ -17,7 +18,13 @@ from telegram import BotCommand
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
 from notify_bot import config, db
-from notify_bot.handlers.admin import approval_callback, approve_cmd, deny_cmd, pending_cmd, users_cmd
+from notify_bot.handlers.admin import (
+    approval_callback,
+    approve_cmd,
+    deny_cmd,
+    pending_cmd,
+    users_cmd,
+)
 from notify_bot.handlers.common import help_command, request_access, start
 from notify_bot.handlers.enroll import build_enroll_handler, unenroll_command
 from notify_bot.handlers.eur import eur_command
@@ -50,19 +57,21 @@ async def _post_init(application: Application) -> None:
     logger.info("Database initialised at %s", config.DATABASE_PATH)
 
     # Register commands so the Telegram menu (/) shows them all
-    await application.bot.set_my_commands([
-        BotCommand("start",    "Welcome message"),
-        BotCommand("help",     "Show all available commands"),
-        BotCommand("request",  "Ask the admin for access"),
-        BotCommand("change",   "EUR exchange rates (Cuba)"),
-        BotCommand("enroll",   "Save your personal data"),
-        BotCommand("unenroll", "Delete your saved profile data"),
-        BotCommand("driver",   "Check driving licence obligations (MVR)"),
-        BotCommand("plate",    "Check vehicle obligations (MVR)"),
-        BotCommand("vignette", "Check road e-vignette (bgtoll.bg)"),
-        BotCommand("sticker",  "Check Sofia parking sticker"),
-        BotCommand("clamp",    "Check wheel-clamp status"),
-    ])
+    await application.bot.set_my_commands(
+        [
+            BotCommand("start", "Welcome message"),
+            BotCommand("help", "Show all available commands"),
+            BotCommand("request", "Ask the admin for access"),
+            BotCommand("change", "EUR exchange rates (Cuba)"),
+            BotCommand("enroll", "Save your personal data"),
+            BotCommand("unenroll", "Delete your saved profile data"),
+            BotCommand("driver", "Check driving licence obligations (MVR)"),
+            BotCommand("plate", "Check vehicle obligations (MVR)"),
+            BotCommand("vignette", "Check road e-vignette (bgtoll.bg)"),
+            BotCommand("sticker", "Check Sofia parking sticker"),
+            BotCommand("clamp", "Check wheel-clamp status"),
+        ]
+    )
     logger.info("Bot commands menu updated")
 
     job_queue = application.job_queue
@@ -84,12 +93,7 @@ def run_bot() -> None:
             "Create a bot via @BotFather and export its token."
         )
 
-    application = (
-        Application.builder()
-        .token(config.TOKEN)
-        .post_init(_post_init)
-        .build()
-    )
+    application = Application.builder().token(config.TOKEN).post_init(_post_init).build()
 
     # ── ConversationHandlers must come first ──────────────────────────────────
     application.add_handler(build_enroll_handler())
@@ -116,9 +120,7 @@ def run_bot() -> None:
 
     # ── Inline button callbacks ───────────────────────────────────────────────
     # Pattern must be registered before a generic catch-all if one were added
-    application.add_handler(
-        CallbackQueryHandler(approval_callback, pattern=r"^(approve|deny):")
-    )
+    application.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^(approve|deny):"))
 
     logger.info(
         "Bot starting — admin_id=%s, db=%s, report_time=%s UTC",

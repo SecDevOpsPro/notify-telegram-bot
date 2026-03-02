@@ -1,4 +1,5 @@
 """EUR exchange rate handler — /change command (public, no approval required)."""
+
 from __future__ import annotations
 
 import logging

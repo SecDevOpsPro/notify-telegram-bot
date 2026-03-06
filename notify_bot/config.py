@@ -20,3 +20,10 @@ _h, _m = _raw_time.split(":")
 
 #: UTC time at which the daily obligations report is sent to all approved users.
 DAILY_REPORT_TIME: time = time(int(_h), int(_m))
+
+# ── Proxy / Cloudflare bypass ──────────────────────────────────────────────────
+
+#: Optional FlareSolverr base URL (e.g. ``http://flaresolverr:8191``).
+#: When set, the Sofia Traffic service uses its REST API to bypass Cloudflare
+#: challenges instead of making direct HTTP requests.
+FLARESOLVERR_URL: str = os.environ.get("FLARESOLVERR_URL", "").rstrip("/")

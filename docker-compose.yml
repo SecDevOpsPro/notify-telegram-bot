@@ -30,11 +30,8 @@ services:
       - DATABASE_PATH=${DATABASE_PATH:-/app/data/bot.db}
       - DAILY_REPORT_TIME=${DAILY_REPORT_TIME:-08:00}
       - LOGLEVEL=${LOGLEVEL:-INFO}
-      # Proxy — set to route traffic through FlareSolverr or any HTTP proxy
-      # e.g. HTTP_PROXY=http://flaresolverr:8191
-      - HTTP_PROXY=${HTTP_PROXY:-}
-      - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=${NO_PROXY:-}
+      # Cloudflare bypass via FlareSolverr REST API
+      - FLARESOLVERR_URL=http://flaresolverr:8191
     volumes:
       - data:/app/data   # persists SQLite database between restarts
     depends_on:

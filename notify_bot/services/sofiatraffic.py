@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from notify_bot import config
+
 logger = logging.getLogger(__name__)
 
 _PARKING_PAGE_URL = "https://www.sofiatraffic.bg/bg/parking"
@@ -236,6 +238,60 @@ def _parse_clamp(plate: str, data: dict) -> ClampInfo:
     )
 
 
+# ── FlareSolverr helper ───────────────────────────────────────────────────────
+
+
+async def _get_cookies_via_flaresolverr() -> tuple[dict, str]:
+    """
+    Use FlareSolverr's REST API to fetch the parking page through the browser,
+    bypassing the Cloudflare challenge and returning the session cookies.
+
+    Returns:
+        Tuple of (cookies_dict, decoded_xsrf_token)
+
+    Raises:
+        :class:`CsrfFetchError`:    when FlareSolverr fails or cookies are missing.
+        :class:`SofiaTrafficError`: on connection failures to FlareSolverr.
+    """
+    endpoint = f"{config.FLARESOLVERR_URL}/v1"
+    payload = {
+        "cmd": "request.get",
+        "url": _PARKING_PAGE_URL,
+        "maxTimeout": 60000,
+        "session": "sofia_traffic",  # reuse persistent browser session
+    }
+    logger.debug("FlareSolverr: POST %s for %s", endpoint, _PARKING_PAGE_URL)
+    try:
+        async with httpx.AsyncClient(timeout=70.0) as client:
+            resp = await client.post(endpoint, json=payload)
+    except httpx.HTTPError as exc:
+        raise SofiaTrafficError(f"FlareSolverr connection error: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise CsrfFetchError(
+            f"FlareSolverr returned HTTP {resp.status_code}"
+        )
+
+    try:
+        data = resp.json()
+    except Exception as exc:
+        raise CsrfFetchError("FlareSolverr returned non-JSON response") from exc
+
+    if data.get("status") != "ok":
+        raise CsrfFetchError(f"FlareSolverr failed: {data.get('message', 'unknown error')}")
+
+    cookies: dict = {
+        c["name"]: c["value"]
+        for c in data.get("solution", {}).get("cookies", [])
+    }
+    xsrf_raw = cookies.get("XSRF-TOKEN")
+    if not xsrf_raw:
+        raise CsrfFetchError("FlareSolverr: XSRF-TOKEN not found in cookies")
+
+    logger.debug("FlareSolverr: session cookies obtained (%d cookies)", len(cookies))
+    return cookies, urllib.parse.unquote(xsrf_raw)
+
+
 # ── Internal CSRF helper ──────────────────────────────────────────────────────
 
 
@@ -280,11 +336,21 @@ async def _get_csrf_client() -> tuple[httpx.AsyncClient, str]:
         :class:`CsrfFetchError`: when the XSRF-TOKEN cookie is absent.
         :class:`SofiaTrafficError`: on connection failures.
     """
+    if config.FLARESOLVERR_URL:
+        cookies, xsrf = await _get_cookies_via_flaresolverr()
+        client = httpx.AsyncClient(
+            follow_redirects=True,
+            headers=_BROWSER_HEADERS,
+            timeout=20.0,
+            cookies=cookies,  # includes cf_clearance for the actual API call
+        )
+        return client, xsrf
+
+    # Direct path — works on residential IPs not blocked by Cloudflare
     client = httpx.AsyncClient(
         follow_redirects=True,
         headers=_BROWSER_HEADERS,
         timeout=20.0,
-        trust_env=True,  # respects HTTP_PROXY / HTTPS_PROXY env vars (e.g. FlareSolverr)
     )
     try:
         r = await client.get(_PARKING_PAGE_URL)
@@ -297,6 +363,13 @@ async def _get_csrf_client() -> tuple[httpx.AsyncClient, str]:
         raise CloudflareError(
             "Cloudflare blocked the request (status %d) while fetching the parking page."
             % r.status_code
+        )
+
+    if r.status_code != 200:
+        await client.aclose()
+        raise SofiaTrafficError(
+            f"Parking page returned unexpected status {r.status_code}. "
+            "The site URL may have changed."
         )
 
     xsrf_raw = client.cookies.get("XSRF-TOKEN")

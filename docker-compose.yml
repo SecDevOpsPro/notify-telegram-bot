@@ -1,5 +1,3 @@
-version: "3.7"
-
 services:
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
@@ -39,6 +37,8 @@ services:
       - NO_PROXY=${NO_PROXY:-}
     volumes:
       - data:/app/data   # persists SQLite database between restarts
+    depends_on:
+      - flaresolverr
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

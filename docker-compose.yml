@@ -1,6 +1,13 @@
 version: "3.7"
 
 services:
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    ports:
+      - 8191
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
   app:
     build:
       context: .
@@ -31,4 +38,9 @@ services:
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=${NO_PROXY:-}
     volumes:
-      - ./data:/app/data   # persists SQLite database between restarts
+      - data:/app/data   # persists SQLite database between restarts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  data:

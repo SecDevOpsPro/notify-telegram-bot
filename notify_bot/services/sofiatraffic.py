@@ -239,6 +239,36 @@ def _parse_clamp(plate: str, data: dict) -> ClampInfo:
 # ── Internal CSRF helper ──────────────────────────────────────────────────────
 
 
+def _parse_json_response(resp: httpx.Response) -> dict:
+    """
+    Extract JSON from a response with specific handling for Cloudflare silent blocks.
+
+    - Empty body (200 with no content) → :class:`CloudflareError`
+    - HTML containing "cloudflare" or "challenge" → :class:`CloudflareError`
+    - Non-JSON content type → :class:`SofiaTrafficError` with a body snippet
+    - Malformed JSON → :class:`SofiaTrafficError`
+    """
+    if not resp.content:
+        raise CloudflareError(
+            "API returned empty response body — likely a silent Cloudflare block "
+            "(no cf_clearance cookie)."
+        )
+    content_type = resp.headers.get("content-type", "")
+    if "json" not in content_type:
+        snippet = resp.text[:300]
+        if "cloudflare" in snippet.lower() or "challenge" in snippet.lower():
+            raise CloudflareError(
+                "Cloudflare challenge page returned instead of JSON response."
+            )
+        raise SofiaTrafficError(
+            f"API returned non-JSON content-type '{content_type}': {snippet!r}"
+        )
+    try:
+        return resp.json()
+    except Exception as exc:
+        raise SofiaTrafficError("API returned malformed JSON response") from exc
+
+
 async def _get_csrf_client() -> tuple[httpx.AsyncClient, str]:
     """
     Return a new *open* httpx client and the decoded XSRF token.
@@ -254,6 +284,7 @@ async def _get_csrf_client() -> tuple[httpx.AsyncClient, str]:
         follow_redirects=True,
         headers=_BROWSER_HEADERS,
         timeout=20.0,
+        trust_env=True,  # respects HTTP_PROXY / HTTPS_PROXY env vars (e.g. FlareSolverr)
     )
     try:
         r = await client.get(_PARKING_PAGE_URL)
@@ -327,9 +358,9 @@ async def check_sticker(plate: str) -> StickerInfo:
         raise SofiaTrafficError(f"API returned HTTP {resp.status_code}") from exc
 
     try:
-        data = resp.json()
-    except Exception as exc:
-        raise SofiaTrafficError("API returned non-JSON response") from exc
+        data = _parse_json_response(resp)
+    except (CloudflareError, SofiaTrafficError):
+        raise
 
     return _parse_sticker(plate, data)
 
@@ -378,8 +409,8 @@ async def check_clamp(plate: str) -> ClampInfo:
         raise SofiaTrafficError(f"API returned HTTP {resp.status_code}") from exc
 
     try:
-        data = resp.json()
-    except Exception as exc:
-        raise SofiaTrafficError("API returned non-JSON response") from exc
+        data = _parse_json_response(resp)
+    except (CloudflareError, SofiaTrafficError):
+        raise
 
     return _parse_clamp(plate, data)

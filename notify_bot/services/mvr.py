@@ -74,7 +74,10 @@ class MVRApiError(Exception):
 
 
 async def _fetch(params: dict[str, str]) -> dict:
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(
+        timeout=60.0,
+        trust_env=True,  # respects HTTP_PROXY / HTTPS_PROXY env vars
+    ) as client:
         resp = await client.get(_BASE_URL, params=params, headers=_HEADERS, cookies=_COOKIES)
         resp.raise_for_status()
         return resp.json()

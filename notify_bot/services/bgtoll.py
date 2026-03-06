@@ -180,7 +180,11 @@ async def check_vignette(
     logger.debug("Vignette check: GET %s", url)
 
     try:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=20.0,
+            follow_redirects=True,
+            trust_env=True,  # respects HTTP_PROXY / HTTPS_PROXY env vars
+        ) as client:
             resp = await client.get(url, headers=_HEADERS)
     except httpx.HTTPError as exc:
         raise BgtollError(f"Connection error: {exc}") from exc

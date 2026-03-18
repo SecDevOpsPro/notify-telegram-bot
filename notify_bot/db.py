@@ -125,40 +125,25 @@ async def upsert_profile(
     """
     Insert or partially update a user profile.
     Only non-None arguments overwrite existing values.
+
+    Uses a single atomic INSERT ... ON CONFLICT so concurrent calls for the
+    same user_id never race on a read-then-write.
+    COALESCE keeps the existing column value when the argument is None.
     """
-    existing = await get_profile(user_id)
-
-    if not existing:
-        async with aiosqlite.connect(_db_path()) as db:
-            await db.execute(
-                """
-                INSERT INTO user_profiles
-                    (user_id, national_id, driving_licence, vehicle_plate, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (user_id, national_id, driving_licence, vehicle_plate, _now()),
-            )
-            await db.commit()
-        return
-
-    # Partial update — only touch explicitly provided fields
-    updates: dict[str, str] = {}
-    if national_id is not None:
-        updates["national_id"] = national_id
-    if driving_licence is not None:
-        updates["driving_licence"] = driving_licence
-    if vehicle_plate is not None:
-        updates["vehicle_plate"] = vehicle_plate
-
-    if not updates:
-        return
-
-    updates["updated_at"] = _now()
-    set_clause = ", ".join(f"{col} = ?" for col in updates)
-    values = list(updates.values()) + [user_id]
-
     async with aiosqlite.connect(_db_path()) as db:
-        await db.execute(f"UPDATE user_profiles SET {set_clause} WHERE user_id = ?", values)
+        await db.execute(
+            """
+            INSERT INTO user_profiles
+                (user_id, national_id, driving_licence, vehicle_plate, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                national_id     = COALESCE(excluded.national_id,     national_id),
+                driving_licence = COALESCE(excluded.driving_licence, driving_licence),
+                vehicle_plate   = COALESCE(excluded.vehicle_plate,   vehicle_plate),
+                updated_at      = excluded.updated_at
+            """,
+            (user_id, national_id, driving_licence, vehicle_plate, _now()),
+        )
         await db.commit()
 
 

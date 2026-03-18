@@ -93,7 +93,13 @@ def run_bot() -> None:
             "Create a bot via @BotFather and export its token."
         )
 
-    application = Application.builder().token(config.TOKEN).post_init(_post_init).build()
+    application = (
+        Application.builder()
+        .token(config.TOKEN)
+        .concurrent_updates(True)
+        .post_init(_post_init)
+        .build()
+    )
 
     # ── ConversationHandlers must come first ──────────────────────────────────
     application.add_handler(build_enroll_handler())

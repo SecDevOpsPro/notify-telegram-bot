@@ -387,6 +387,48 @@ async def _get_csrf_client() -> tuple[httpx.AsyncClient, str]:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
+async def _request_sticker(client: httpx.AsyncClient, xsrf: str, plate: str) -> StickerInfo:
+    """Make the sticker API call using an already-open authenticated client."""
+    url = f"{_API_BASE}/sticker/{plate}"
+    try:
+        resp = await client.get(url, headers={**_XHR_HEADERS, "X-XSRF-TOKEN": xsrf})
+    except httpx.HTTPError as exc:
+        raise SofiaTrafficError(f"Connection error: {exc}") from exc
+
+    if resp.status_code in (403, 503):
+        raise CloudflareError(
+            "Cloudflare blocked the sticker API request (status %d)." % resp.status_code
+        )
+    if resp.status_code == 404:
+        return StickerInfo(plate=plate, found=False, raw={})
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise SofiaTrafficError(f"API returned HTTP {resp.status_code}") from exc
+    return _parse_sticker(plate, _parse_json_response(resp))
+
+
+async def _request_clamp(client: httpx.AsyncClient, xsrf: str, plate: str) -> ClampInfo:
+    """Make the clamp API call using an already-open authenticated client."""
+    url = f"{_API_BASE}/clamp/{plate}"
+    try:
+        resp = await client.get(url, headers={**_XHR_HEADERS, "X-XSRF-TOKEN": xsrf})
+    except httpx.HTTPError as exc:
+        raise SofiaTrafficError(f"Connection error: {exc}") from exc
+
+    if resp.status_code in (403, 503):
+        raise CloudflareError(
+            "Cloudflare blocked the clamp API request (status %d)." % resp.status_code
+        )
+    if resp.status_code == 404:
+        return ClampInfo(plate=plate, found=False, clamped=False, raw={})
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise SofiaTrafficError(f"API returned HTTP {resp.status_code}") from exc
+    return _parse_clamp(plate, _parse_json_response(resp))
+
+
 async def check_sticker(plate: str) -> StickerInfo:
     """
     Check whether a vehicle has a registered parking e-vignette sticker in Sofia.
@@ -403,39 +445,12 @@ async def check_sticker(plate: str) -> StickerInfo:
         :class:`SofiaTrafficError`: on any other HTTP or connection error.
     """
     plate = plate.upper()
-    url = f"{_API_BASE}/sticker/{plate}"
-    logger.debug("Parking sticker check: GET %s", url)
-
+    logger.debug("Parking sticker check: GET %s/sticker/%s", _API_BASE, plate)
     client, xsrf = await _get_csrf_client()
     try:
-        resp = await client.get(
-            url,
-            headers={**_XHR_HEADERS, "X-XSRF-TOKEN": xsrf},
-        )
-    except httpx.HTTPError as exc:
-        raise SofiaTrafficError(f"Connection error: {exc}") from exc
+        return await _request_sticker(client, xsrf, plate)
     finally:
         await client.aclose()
-
-    if resp.status_code in (403, 503):
-        raise CloudflareError(
-            "Cloudflare blocked the sticker API request (status %d)." % resp.status_code
-        )
-
-    if resp.status_code == 404:
-        return StickerInfo(plate=plate, found=False, raw={})
-
-    try:
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise SofiaTrafficError(f"API returned HTTP {resp.status_code}") from exc
-
-    try:
-        data = _parse_json_response(resp)
-    except (CloudflareError, SofiaTrafficError):
-        raise
-
-    return _parse_sticker(plate, data)
 
 
 async def check_clamp(plate: str) -> ClampInfo:
@@ -454,36 +469,32 @@ async def check_clamp(plate: str) -> ClampInfo:
         :class:`SofiaTrafficError`: on any other HTTP or connection error.
     """
     plate = plate.upper()
-    url = f"{_API_BASE}/clamp/{plate}"
-    logger.debug("Wheel clamp check: GET %s", url)
-
+    logger.debug("Wheel clamp check: GET %s/clamp/%s", _API_BASE, plate)
     client, xsrf = await _get_csrf_client()
     try:
-        resp = await client.get(
-            url,
-            headers={**_XHR_HEADERS, "X-XSRF-TOKEN": xsrf},
-        )
-    except httpx.HTTPError as exc:
-        raise SofiaTrafficError(f"Connection error: {exc}") from exc
+        return await _request_clamp(client, xsrf, plate)
     finally:
         await client.aclose()
 
-    if resp.status_code in (403, 503):
-        raise CloudflareError(
-            "Cloudflare blocked the clamp API request (status %d)." % resp.status_code
-        )
 
-    if resp.status_code == 404:
-        return ClampInfo(plate=plate, found=False, clamped=False, raw={})
+async def check_sticker_and_clamp(plate: str) -> tuple[StickerInfo, ClampInfo]:
+    """
+    Check sticker and clamp status together using a single CSRF session fetch.
 
+    Avoids the double page-load overhead of calling :func:`check_sticker` and
+    :func:`check_clamp` back-to-back (e.g. in the daily scheduled report).
+
+    Raises:
+        :class:`CloudflareError`:  when Cloudflare challenges any request.
+        :class:`CsrfFetchError`:   when the CSRF token cannot be obtained.
+        :class:`SofiaTrafficError`: on any other HTTP or connection error.
+    """
+    plate = plate.upper()
+    logger.debug("Combined sticker+clamp check for %s", plate)
+    client, xsrf = await _get_csrf_client()
     try:
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise SofiaTrafficError(f"API returned HTTP {resp.status_code}") from exc
-
-    try:
-        data = _parse_json_response(resp)
-    except (CloudflareError, SofiaTrafficError):
-        raise
-
-    return _parse_clamp(plate, data)
+        sticker = await _request_sticker(client, xsrf, plate)
+        clamp = await _request_clamp(client, xsrf, plate)
+    finally:
+        await client.aclose()
+    return sticker, clamp

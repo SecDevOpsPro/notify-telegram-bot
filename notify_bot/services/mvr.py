@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+from jinja2 import Template
+
+from notify_bot import config
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +39,6 @@ _HEADERS = {
 }
 
 _COOKIES = {
-    "EAUSessionID": "b5345242-002d-4cca-878a-991c3db0cf0e",
     "currentLang": "en",
 }
 
@@ -74,11 +76,12 @@ class MVRApiError(Exception):
 
 
 async def _fetch(params: dict[str, str]) -> dict:
+    cookies = {**_COOKIES, "EAUSessionID": config.MVR_SESSION_ID}
     async with httpx.AsyncClient(
         timeout=60.0,
         trust_env=True,  # respects HTTP_PROXY / HTTPS_PROXY env vars
     ) as client:
-        resp = await client.get(_BASE_URL, params=params, headers=_HEADERS, cookies=_COOKIES)
+        resp = await client.get(_BASE_URL, params=params, headers=_HEADERS, cookies=cookies)
         resp.raise_for_status()
         return resp.json()
 
@@ -156,3 +159,20 @@ async def check_by_plate(national_id: str, plate_number: str) -> list[Obligation
         raise MVRApiError(f"MVR API connection error: {exc}") from exc
 
     return _parse(data)
+
+
+# ── Formatting ────────────────────────────────────────────────────────────────
+
+_OBLIGATIONS_TEMPLATE = Template(
+    "{% for unit in units %}\n"
+    "<b>{{ unit.unit_group_label }}</b>\n"
+    "{% if unit.has_obligations %}"
+    "{% for ob in unit.obligations %}  • {{ ob }}\n{% endfor %}"
+    "{% else %}  ✅ No obligations found\n"
+    "{% endif %}{% endfor %}"
+)
+
+
+def render_obligations(units: list[Obligation]) -> str:
+    """Render a list of Obligation groups as an HTML Telegram message body."""
+    return _OBLIGATIONS_TEMPLATE.render(units=units)

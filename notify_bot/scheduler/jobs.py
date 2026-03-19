@@ -18,17 +18,15 @@ import logging
 from datetime import timedelta
 from typing import Any, Callable, Coroutine, Type
 
-from jinja2 import Template
 from telegram.ext import ContextTypes
 
 from notify_bot import db
 from notify_bot.services.bgtoll import BgtollError, CloudflareBlockedError, check_vignette
-from notify_bot.services.mvr import MVRApiError, Obligation, check_by_licence, check_by_plate
+from notify_bot.services.mvr import MVRApiError, check_by_licence, check_by_plate, render_obligations
 from notify_bot.services.sofiatraffic import (
     CloudflareError as SofiaCloudflareError,
     SofiaTrafficError,
-    check_clamp,
-    check_sticker,
+    check_sticker_and_clamp,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,23 +44,6 @@ _RETRY_ATTEMPTS: int = 3
 
 #: Base delay (seconds) for exponential backoff — doubles each attempt.
 _RETRY_BASE_DELAY: float = 5.0
-
-# ── Template ──────────────────────────────────────────────────────────────────
-
-_TEMPLATE = Template(
-    """{% for unit in units %}
-<b>{{ unit.unit_group_label }}</b>
-{% if unit.has_obligations %}
-{% for ob in unit.obligations %}  • {{ ob }}
-{% endfor %}
-{% else %}  ✅ No obligations
-{% endif %}{% endfor %}"""
-)
-
-
-def _render(units: list[Obligation]) -> str:
-    return _TEMPLATE.render(units=units)
-
 
 # ── Retry helper ──────────────────────────────────────────────────────────────
 
@@ -124,16 +105,17 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     if national_id and licence:
         try:
             units = await _retry(check_by_licence, national_id, licence)
-            sections.append("🪪 <b>By driving licence:</b>\n" + _render(units))
+            sections.append("🪪 <b>By driving licence:</b>\n" + render_obligations(units))
         except MVRApiError as exc:
             logger.warning("Licence check failed for user %s: %s", uid, exc)
             sections.append(f"🪪 <b>By driving licence:</b>\n⚠️ Check failed: {exc}")
-        await asyncio.sleep(_INTER_CHECK_DELAY)
+        if plate:  # only pause if plate-based checks follow
+            await asyncio.sleep(_INTER_CHECK_DELAY)
 
     if national_id and plate:
         try:
             units = await _retry(check_by_plate, national_id, plate)
-            sections.append("🚗 <b>By vehicle plate (MVR):</b>\n" + _render(units))
+            sections.append("🚗 <b>By vehicle plate (MVR):</b>\n" + render_obligations(units))
         except MVRApiError as exc:
             logger.warning("Plate check failed for user %s: %s", uid, exc)
             sections.append(f"🚗 <b>By vehicle plate (MVR):</b>\n⚠️ Check failed: {exc}")
@@ -168,8 +150,8 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if plate:
         try:
-            sticker = await _retry(
-                check_sticker, plate, skip_on=(SofiaCloudflareError,)
+            sticker, clamp = await _retry(
+                check_sticker_and_clamp, plate, skip_on=(SofiaCloudflareError,)
             )
             if sticker.found:
                 status_icon = "✅" if sticker.is_valid else "❌"
@@ -184,15 +166,6 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
                 sections.append(
                     f"🅿️ <b>Parking sticker ({plate}):</b>\n❌ No active parking sticker found."
                 )
-        except SofiaCloudflareError:
-            logger.debug("Sticker check skipped for user %s — Cloudflare blocked", uid)
-        except SofiaTrafficError as exc:
-            logger.warning("Sticker check failed for user %s: %s", uid, exc)
-        await asyncio.sleep(_INTER_CHECK_DELAY)
-
-    if plate:
-        try:
-            clamp = await _retry(check_clamp, plate, skip_on=(SofiaCloudflareError,))
             if clamp.found and clamp.clamped:
                 clamp_lines = [
                     f"🔒 <b>Wheel clamp ({plate}):</b>",
@@ -205,9 +178,9 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
                 sections.append("\n".join(clamp_lines))
             # If not clamped: omit from daily report (no news is good news)
         except SofiaCloudflareError:
-            logger.debug("Clamp check skipped for user %s — Cloudflare blocked", uid)
+            logger.debug("Sticker/clamp check skipped for user %s — Cloudflare blocked", uid)
         except SofiaTrafficError as exc:
-            logger.warning("Clamp check failed for user %s: %s", uid, exc)
+            logger.warning("Sticker/clamp check failed for user %s: %s", uid, exc)
 
     if not sections:
         return

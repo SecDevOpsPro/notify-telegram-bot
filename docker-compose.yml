@@ -12,9 +12,6 @@ services:
       dockerfile: Dockerfile
       no_cache: true
       pull: true
-      platforms:
-        - "linux/amd64"
-        - "linux/arm64"
       args:
         - COMMIT_HASH=${COMMIT_HASH:-}
       tags:

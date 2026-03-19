@@ -16,10 +16,22 @@ DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "/app/data/bot.db")
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 _raw_time: str = os.environ.get("DAILY_REPORT_TIME", "08:00")
-_h, _m = _raw_time.split(":")
+try:
+    _h, _m = _raw_time.split(":")
+    #: UTC time at which the daily obligations report is sent to all approved users.
+    DAILY_REPORT_TIME: time = time(int(_h), int(_m))
+except (ValueError, TypeError) as _e:
+    raise ValueError(
+        f"Invalid DAILY_REPORT_TIME={_raw_time!r}. Expected HH:MM format (e.g. '08:00')."
+    ) from _e
 
-#: UTC time at which the daily obligations report is sent to all approved users.
-DAILY_REPORT_TIME: time = time(int(_h), int(_m))
+# ── MVR ───────────────────────────────────────────────────────────────────────
+
+#: Session cookie for the MVR e-services API.  Rotate via env var when the
+#: cookie expires (symptom: MVR checks return empty results or auth errors).
+MVR_SESSION_ID: str = os.environ.get(
+    "MVR_SESSION_ID", "b5345242-002d-4cca-878a-991c3db0cf0e"
+)
 
 # ── Proxy / Cloudflare bypass ──────────────────────────────────────────────────
 

@@ -15,14 +15,13 @@ from __future__ import annotations
 
 import logging
 
-from jinja2 import Template
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from notify_bot import db
 from notify_bot.middlewares import require_approved
 from notify_bot.services.bgtoll import BgtollError, CloudflareBlockedError, check_vignette
-from notify_bot.services.mvr import MVRApiError, Obligation, check_by_licence, check_by_plate
+from notify_bot.services.mvr import MVRApiError, check_by_licence, check_by_plate, render_obligations
 from notify_bot.services.sofiatraffic import (
     CloudflareError as SofiaCloudflareError,
     SofiaTrafficError,
@@ -31,22 +30,6 @@ from notify_bot.services.sofiatraffic import (
 )
 
 logger = logging.getLogger(__name__)
-
-_OBLIGATIONS_TEMPLATE = Template(
-    """<b>🔎 Obligations check</b>
-{% for unit in units %}
-
-<b>{{ unit.unit_group_label }}</b>
-{% if unit.has_obligations %}
-{% for ob in unit.obligations %}  • {{ ob }}
-{% endfor %}
-{% else %}  ✅ No obligations found
-{% endif %}{% endfor %}"""
-)
-
-
-def _render(units: list[Obligation]) -> str:
-    return _OBLIGATIONS_TEMPLATE.render(units=units)
 
 
 # ── /driver ───────────────────────────────────────────────────────────────────
@@ -74,7 +57,7 @@ async def driver_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"⚠️ MVR API error: {exc}")
         return
 
-    await update.message.reply_html(_render(units))
+    await update.message.reply_html("<b>🔎 Obligations check</b>\n" + render_obligations(units))
 
 
 # ── /vignette ─────────────────────────────────────────────────────────────────
@@ -287,4 +270,4 @@ async def plate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(f"⚠️ MVR API error: {exc}")
         return
 
-    await update.message.reply_html(_render(units))
+    await update.message.reply_html("<b>🔎 Obligations check</b>\n" + render_obligations(units))

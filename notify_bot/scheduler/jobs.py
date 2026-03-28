@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
 from typing import Any, Callable, Coroutine, Type
 
 from telegram.ext import ContextTypes
@@ -34,7 +33,7 @@ logger = logging.getLogger(__name__)
 # ── Tuning knobs ──────────────────────────────────────────────────────────────
 
 #: Seconds between each user's report job (spreads API calls across time).
-_USER_STAGGER: int = 60
+_USER_STAGGER: int = 260
 
 #: Seconds to sleep between individual API calls within one user's report.
 _INTER_CHECK_DELAY: float = 3.0
@@ -209,10 +208,9 @@ async def daily_obligations_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
     for i, user in enumerate(users):
-        offset = timedelta(seconds=i * _USER_STAGGER)
         context.job_queue.run_once(  # type: ignore[union-attr]
             _send_user_report,
-            when=offset,
+            when=i * _USER_STAGGER,  # int seconds from now; 0 = immediate, 60 = in 60s, …
             data=user,
             name=f"report_user_{user['user_id']}",
         )

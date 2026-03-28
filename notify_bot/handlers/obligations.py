@@ -22,6 +22,7 @@ from notify_bot import db
 from notify_bot.middlewares import require_approved
 from notify_bot.services.boleron import (
     BoleronError,
+    BoleronNotFoundError,
     VehicleData,
     check_fines,
     check_gtp,
@@ -443,8 +444,15 @@ async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         v: VehicleData = await check_vehicle_data(
             profile["vehicle_plate"], profile["talon_no"]
         )
+    except BoleronNotFoundError:
+        await update.message.reply_html(
+            "⚠️ <b>Vehicle not found.</b>\n\n"
+            "The plate and talon number don't match any vehicle in the registry.\n"
+            "Use /enroll to update your talon number."
+        )
+        return
     except BoleronError as exc:
-        logger.exception("Boleron vehicleDataServices error for user %s", uid)
+        logger.warning("Boleron vehicleDataServices error for user %s: %s", uid, exc)
         await update.message.reply_text(f"⚠️ Service error: {exc}")
         return
 

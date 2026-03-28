@@ -116,6 +116,10 @@ class BoleronError(Exception):
     """Base exception for boleron.bg API errors."""
 
 
+class BoleronNotFoundError(BoleronError):
+    """Raised when the API returns 500 (typically mismatched plate/talon)."""
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 
@@ -156,6 +160,8 @@ async def _get(path: str, params: dict, *, base: str = _API_BASE) -> dict:
     except httpx.RequestError as exc:
         raise BoleronError(f"Request error: {exc}") from exc
 
+    if resp.status_code == 500:
+        raise BoleronNotFoundError(f"No data returned from {path} (plate/talon mismatch?)")
     if resp.status_code != 200:
         raise BoleronError(f"HTTP {resp.status_code} from {path}")
 
@@ -167,17 +173,23 @@ async def _get(path: str, params: dict, *, base: str = _API_BASE) -> dict:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-_BG_SUFFIX_RE = re.compile(r"[г.ч\s]+$")
+_TIME_SUFFIX_RE = re.compile(r"\s+\d{1,2}:\d{2}:\d{2}$")
+_NON_DIGIT_TAIL_RE = re.compile(r"[^\d]+$")
 
 
 def _clean_date(value: str | None) -> str | None:
-    """Strip Bulgarian date/time suffixes (г., ч.) and trim whitespace."""
+    """Return just the date portion, stripping Bulgarian suffixes and time.
+
+    Handles:
+      "15.12.2025г."         → "15.12.2025"
+      "14.12.2026г. 23:59:59" → "14.12.2026"
+      "15.04.2025 00:00:00"  → "15.04.2025"
+    """
     if not value:
         return None
-    cleaned = _BG_SUFFIX_RE.sub("", value.strip()).strip()
-    # Keep only date portion (drop time " 00:00:00" if all zeros)
-    if cleaned.endswith(" 00:00:00"):
-        cleaned = cleaned[: -len(" 00:00:00")]
+    cleaned = value.strip()
+    cleaned = _TIME_SUFFIX_RE.sub("", cleaned).strip()   # drop HH:MM:SS
+    cleaned = _NON_DIGIT_TAIL_RE.sub("", cleaned).strip()  # drop г., ч., …
     return cleaned or None
 
 

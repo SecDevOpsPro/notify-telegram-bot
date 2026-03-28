@@ -14,8 +14,9 @@ import logging
 import os
 import pathlib
 
+import telegram.error
 from telegram import BotCommand
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from notify_bot import config, db
 from notify_bot.handlers.admin import (
@@ -42,6 +43,19 @@ logging.basicConfig(
     level=os.environ.get("LOGLEVEL", "INFO").upper(),
 )
 logger = logging.getLogger(__name__)
+
+
+async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Global error handler. Stops the bot on Conflict (duplicate instance)."""
+    err = context.error
+    if isinstance(err, telegram.error.Conflict):
+        logger.critical(
+            "Conflict: another bot instance is running. Stopping this instance."
+        )
+        # Schedule a graceful stop so the event loop can wind down cleanly.
+        context.application.stop_running()
+        return
+    logger.warning("Unhandled update error: %s", err, exc_info=err)
 
 
 async def _post_init(application: Application) -> None:
@@ -127,6 +141,9 @@ def run_bot() -> None:
     # ── Inline button callbacks ───────────────────────────────────────────────
     # Pattern must be registered before a generic catch-all if one were added
     application.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^(approve|deny):"))
+
+    # ── Global error handler ──────────────────────────────────────────────────
+    application.add_error_handler(_error_handler)
 
     logger.info(
         "Bot starting — admin_id=%s, db=%s, report_time=%s UTC",

@@ -30,7 +30,7 @@ _HELP_PUBLIC = """
 /clamp    — Check wheel-clamp status (sofiatraffic.bg) — also: /clamp &lt;plate&gt;
 
 <b>Admin only:</b>
-/approve &lt;id&gt;, /deny &lt;id&gt;, /pending, /users
+/approve &lt;id&gt;, /deny &lt;id&gt;, /pending, /users, /myip
 """
 
 

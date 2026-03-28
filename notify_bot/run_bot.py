@@ -23,6 +23,7 @@ from notify_bot.handlers.admin import (
     approval_callback,
     approve_cmd,
     deny_cmd,
+    myip_cmd,
     pending_cmd,
     users_cmd,
 )
@@ -84,6 +85,7 @@ async def _post_init(application: Application) -> None:
             BotCommand("vignette", "Check road e-vignette (bgtoll.bg)"),
             BotCommand("sticker", "Check Sofia parking sticker"),
             BotCommand("clamp", "Check wheel-clamp status"),
+            BotCommand("myip", "Show bot's public IP (admin only)"),
         ]
     )
     logger.info("Bot commands menu updated")
@@ -128,6 +130,7 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("deny", deny_cmd))
     application.add_handler(CommandHandler("pending", pending_cmd))
     application.add_handler(CommandHandler("users", users_cmd))
+    application.add_handler(CommandHandler("myip", myip_cmd))
 
     # ── Feature commands ──────────────────────────────────────────────────────
     application.add_handler(CommandHandler("change", eur_command))

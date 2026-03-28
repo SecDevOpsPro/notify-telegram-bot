@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 
+import httpx
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -117,6 +118,22 @@ async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         for u in users
     ]
     await update.message.reply_html("✅ <b>Approved users:</b>\n\n" + "\n".join(lines))
+
+
+async def myip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/myip — show the public IP of the host running the bot."""
+    if not _is_admin(update.effective_user.id):
+        return
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get("https://api.ipify.org")
+            resp.raise_for_status()
+            ip = resp.text.strip()
+        await update.message.reply_text(f"🌐 Public IP: <code>{ip}</code>", parse_mode="HTML")
+    except Exception as exc:
+        logger.warning("Failed to fetch public IP: %s", exc)
+        await update.message.reply_text("⚠️ Could not determine public IP.")
 
 
 # ── Inline callback ───────────────────────────────────────────────────────────

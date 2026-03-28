@@ -102,16 +102,32 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     try:
         info = await check_vignette(plate)
-    except CloudflareBlockedError:
-        await update.message.reply_html(
-            f"⚠️ <b>Cloudflare blocked the request.</b>\n\n"
-            "The bgtoll.bg site requires a browser to pass its bot-detection challenge.\n"
-            f'Check manually: <a href="https://check.bgtoll.bg/">check.bgtoll.bg</a>'
-        )
-        return
-    except BgtollError as exc:
-        logger.exception("bgtoll API error for user %s", uid)
-        await update.message.reply_text(f"⚠️ Vignette service error: {exc}")
+    except (CloudflareBlockedError, BgtollError) as exc:
+        logger.debug("bgtoll failed for user %s (%s) — trying boleron fallback", uid, exc)
+        try:
+            bv = await check_vignette_boleron(plate)
+        except BoleronError as boleron_exc:
+            logger.warning("Boleron vignette fallback also failed for user %s: %s", uid, boleron_exc)
+            await update.message.reply_html(
+                f"⚠️ <b>Vignette check unavailable.</b>\n\n"
+                f'Check manually: <a href="https://check.bgtoll.bg/">check.bgtoll.bg</a>'
+            )
+            return
+        if not bv.found:
+            await update.message.reply_html(
+                f"🛣️ <b>Vignette for {plate}</b>\n\n❌ No active vignette found."
+            )
+            return
+        status_icon = "✅" if bv.active else "❌"
+        status_label = "Active" if bv.active else "Inactive"
+        lines = [f"🛣️ <b>Vignette for {plate}</b>", f"{status_icon} Status: {status_label}"]
+        if bv.valid_from:
+            lines.append(f"📅 Valid: {bv.valid_from} → {bv.valid_to}")
+        if bv.validity_type:
+            lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
+        if bv.price:
+            lines.append(f"💰 Price: {bv.price}")
+        await update.message.reply_html("\n".join(lines))
         return
 
     if not info.found:

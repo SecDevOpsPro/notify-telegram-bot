@@ -149,8 +149,8 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
                 sections.append("\n".join(vignette_lines))
             else:
                 sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
-        except CloudflareBlockedError:
-            logger.debug("Vignette check blocked for user %s — falling back to boleron", uid)
+        except (CloudflareBlockedError, BgtollError) as exc:
+            logger.debug("Vignette check failed for user %s (%s) — falling back to boleron", uid, exc)
             try:
                 bv: BoleronVignetteInfo = await _retry(check_vignette_boleron, plate)
                 if bv.found:

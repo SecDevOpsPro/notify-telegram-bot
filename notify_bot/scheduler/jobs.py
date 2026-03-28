@@ -21,7 +21,14 @@ from telegram.ext import ContextTypes
 
 from notify_bot import db
 from notify_bot.services.bgtoll import BgtollError, CloudflareBlockedError, check_vignette
-from notify_bot.services.boleron import BoleronError, check_fines, check_gtp, check_mtpl
+from notify_bot.services.boleron import (
+    BoleronError,
+    BoleronVignetteInfo,
+    check_fines,
+    check_gtp,
+    check_mtpl,
+    check_vignette_boleron,
+)
 from notify_bot.services.mvr import MVRApiError, check_by_licence, check_by_plate, render_obligations
 from notify_bot.services.sofiatraffic import (
     CloudflareError as SofiaCloudflareError,
@@ -143,7 +150,27 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
             else:
                 sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
         except CloudflareBlockedError:
-            logger.debug("Vignette check skipped for user %s — Cloudflare blocked", uid)
+            logger.debug("Vignette check blocked for user %s — falling back to boleron", uid)
+            try:
+                bv: BoleronVignetteInfo = await _retry(check_vignette_boleron, plate)
+                if bv.found:
+                    status_icon = "✅" if bv.active else "❌"
+                    status_label = "Active" if bv.active else "Inactive"
+                    bv_lines = [
+                        f"🛣️ <b>Vignette ({plate}):</b>",
+                        f"{status_icon} Status: {status_label}",
+                    ]
+                    if bv.valid_from:
+                        bv_lines.append(f"📅 Valid: {bv.valid_from} → {bv.valid_to}")
+                    if bv.validity_type:
+                        bv_lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
+                    if bv.price:
+                        bv_lines.append(f"💰 Price: {bv.price}")
+                    sections.append("\n".join(bv_lines))
+                else:
+                    sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
+            except BoleronError as exc:
+                logger.warning("Boleron vignette fallback failed for user %s: %s", uid, exc)
         except BgtollError as exc:
             logger.warning("Vignette check failed for user %s: %s", uid, exc)
         await asyncio.sleep(_INTER_CHECK_DELAY)

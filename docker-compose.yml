@@ -33,7 +33,7 @@ services:
       - data:/app/data   # persists SQLite database between restarts
     depends_on:
       - flaresolverr
-    restart: unless-stopped
+    restart: on-failure
     stop_grace_period: 15s
     extra_hosts:
       - "host.docker.internal:host-gateway"

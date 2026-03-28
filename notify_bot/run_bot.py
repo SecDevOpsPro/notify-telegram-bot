@@ -10,9 +10,11 @@ Or via Docker CMD (already configured in Dockerfile):
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import pathlib
+import urllib.request
 
 import telegram.error
 from telegram import BotCommand
@@ -46,6 +48,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _register_atexit_logout(token: str) -> None:
+    """Register a best-effort synchronous logout on process exit.
+
+    Calling getUpdates with timeout=0 releases our long-poll slot so the
+    next instance that starts does not immediately get a 409 Conflict.
+    """
+
+    def _logout() -> None:
+        try:
+            url = f"https://api.telegram.org/bot{token}/getUpdates?timeout=0&limit=1"
+            urllib.request.urlopen(url, timeout=5)  # noqa: S310
+        except Exception:
+            pass
+
+    atexit.register(_logout)
+
+
 async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Global error handler. Stops the bot on Conflict (duplicate instance)."""
     err = context.error
@@ -71,7 +90,16 @@ async def _post_init(application: Application) -> None:
     await db.init_db()
     logger.info("Database initialised at %s", config.DATABASE_PATH)
 
-    # Register commands so the Telegram menu (/) shows them all
+    # Steal the polling slot from any competing instance that is still running.
+    # getUpdates with timeout=0 causes Telegram to cancel the other instance's
+    # active long-poll and immediately return to us with a 200, so WE win the slot.
+    try:
+        await application.bot.get_updates(timeout=0)
+        logger.info("Polling slot acquired (any previous instance evicted)")
+    except Exception as exc:
+        logger.warning("Could not pre-steal polling slot: %s", exc)
+
+    # Register the Telegram command menu
     await application.bot.set_my_commands(
         [
             BotCommand("start", "Welcome message"),
@@ -147,6 +175,10 @@ def run_bot() -> None:
 
     # ── Global error handler ──────────────────────────────────────────────────
     application.add_error_handler(_error_handler)
+
+    # Register atexit logout so our polling slot is released on exit,
+    # meaning the next instance won't get a 409 Conflict on startup.
+    _register_atexit_logout(config.TOKEN)
 
     logger.info(
         "Bot starting — admin_id=%s, db=%s, report_time=%s UTC",

@@ -21,6 +21,7 @@ from telegram.ext import ContextTypes
 
 from notify_bot import db
 from notify_bot.services.bgtoll import BgtollError, CloudflareBlockedError, check_vignette
+from notify_bot.services.boleron import BoleronError, check_fines, check_gtp, check_mtpl
 from notify_bot.services.mvr import MVRApiError, check_by_licence, check_by_plate, render_obligations
 from notify_bot.services.sofiatraffic import (
     CloudflareError as SofiaCloudflareError,
@@ -180,6 +181,50 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.debug("Sticker/clamp check skipped for user %s — Cloudflare blocked", uid)
         except SofiaTrafficError as exc:
             logger.warning("Sticker/clamp check failed for user %s: %s", uid, exc)
+
+    if plate:
+        await asyncio.sleep(_INTER_CHECK_DELAY)
+        try:
+            gtp = await _retry(check_gtp, plate)
+            if gtp.found:
+                sections.append(f"🔧 <b>Technical Inspection ({plate}):</b>\n✅ Valid to: {gtp.valid_to}")
+            else:
+                sections.append(f"🔧 <b>Technical Inspection ({plate}):</b>\n❌ No valid inspection found.")
+        except BoleronError as exc:
+            logger.warning("GTP check failed for user %s: %s", uid, exc)
+        await asyncio.sleep(_INTER_CHECK_DELAY)
+
+        try:
+            mtpl = await _retry(check_mtpl, plate)
+            status_icon = "✅" if mtpl.active else "❌"
+            mtpl_lines = [
+                f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>",
+                f"{status_icon} {'Active' if mtpl.active else 'No active policy'}",
+            ]
+            if mtpl.insurer:
+                mtpl_lines.append(f"🏢 {mtpl.insurer}")
+            if mtpl.valid_to:
+                mtpl_lines.append(f"📅 Valid to: {mtpl.valid_to}")
+            sections.append("\n".join(mtpl_lines))
+        except BoleronError as exc:
+            logger.warning("MTPL check failed for user %s: %s", uid, exc)
+
+    if national_id and licence:
+        await asyncio.sleep(_INTER_CHECK_DELAY)
+        try:
+            fines = await _retry(check_fines, licence, national_id)
+            if fines.has_fines:
+                sym = fines.currency_symbol
+                fines_lines = [
+                    "🚔 <b>Traffic Fines:</b>",
+                    f"❌ {fines.count} fine(s) — Total: {fines.total:.2f} {sym}",
+                ]
+                if fines.total_discount > 0:
+                    fines_lines.append(f"💸 With discount: {fines.total_discount:.2f} {sym}")
+                sections.append("\n".join(fines_lines))
+            # No fines: omit (no news is good news)
+        except BoleronError as exc:
+            logger.warning("Fines check failed for user %s: %s", uid, exc)
 
     if not sections:
         return

@@ -29,8 +29,13 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     national_id      TEXT,
     driving_licence  TEXT,
     vehicle_plate    TEXT,
+    talon_no         TEXT,
     updated_at       TEXT NOT NULL
 )
+"""
+
+_ADD_TALON_COLUMN = """
+ALTER TABLE user_profiles ADD COLUMN talon_no TEXT
 """
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,6 +60,11 @@ async def init_db() -> None:
     async with aiosqlite.connect(_db_path()) as db:
         await db.execute(_CREATE_USERS)
         await db.execute(_CREATE_PROFILES)
+        # Migrate: add talon_no if it doesn't exist yet (idempotent)
+        try:
+            await db.execute(_ADD_TALON_COLUMN)
+        except Exception:
+            pass  # Column already exists
         await db.commit()
 
 
@@ -121,6 +131,7 @@ async def upsert_profile(
     national_id: str | None = None,
     driving_licence: str | None = None,
     vehicle_plate: str | None = None,
+    talon_no: str | None = None,
 ) -> None:
     """
     Insert or partially update a user profile.
@@ -134,15 +145,16 @@ async def upsert_profile(
         await db.execute(
             """
             INSERT INTO user_profiles
-                (user_id, national_id, driving_licence, vehicle_plate, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+                (user_id, national_id, driving_licence, vehicle_plate, talon_no, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 national_id     = COALESCE(excluded.national_id,     national_id),
                 driving_licence = COALESCE(excluded.driving_licence, driving_licence),
                 vehicle_plate   = COALESCE(excluded.vehicle_plate,   vehicle_plate),
+                talon_no        = COALESCE(excluded.talon_no,        talon_no),
                 updated_at      = excluded.updated_at
             """,
-            (user_id, national_id, driving_licence, vehicle_plate, _now()),
+            (user_id, national_id, driving_licence, vehicle_plate, talon_no, _now()),
         )
         await db.commit()
 
@@ -168,7 +180,8 @@ async def get_all_approved_with_profiles() -> list[dict]:
                 u.first_name,
                 p.national_id,
                 p.driving_licence,
-                p.vehicle_plate
+                p.vehicle_plate,
+                p.talon_no
             FROM users u
             JOIN user_profiles p ON u.user_id = p.user_id
             WHERE u.status = 'approved'

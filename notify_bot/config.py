@@ -39,3 +39,11 @@ MVR_SESSION_ID: str = os.environ.get(
 #: When set, the Sofia Traffic service uses its REST API to bypass Cloudflare
 #: challenges instead of making direct HTTP requests.
 FLARESOLVERR_URL: str = os.environ.get("FLARESOLVERR_URL", "").rstrip("/")
+# ── Boleron.bg ───────────────────────────────────────────────────────────
+
+#: Firebase anonymous-auth API key for boleron.bg.
+#: This key is public (embedded in boleron.bg's JS bundle) and used only for
+#: anonymous sign-in.  Override via env var to rotate without a code change.
+BOLERON_FIREBASE_API_KEY: str = os.environ.get(
+    "BOLERON_FIREBASE_API_KEY", "AIzaSyAIBi31AoSZshgiHGTjwYe2TiWrl-TNrbQ"
+)

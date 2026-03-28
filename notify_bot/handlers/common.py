@@ -28,6 +28,10 @@ _HELP_PUBLIC = """
 /vignette — Check road e-vignette (bgtoll.bg) — also: /vignette &lt;plate&gt;
 /sticker  — Check Sofia parking sticker (sofiatraffic.bg) — also: /sticker &lt;plate&gt;
 /clamp    — Check wheel-clamp status (sofiatraffic.bg) — also: /clamp &lt;plate&gt;
+/gtp      — Check technical inspection validity — also: /gtp &lt;plate&gt;
+/mtpl     — Check civil liability insurance — also: /mtpl &lt;plate&gt;
+/fines    — Check traffic fines (KAT)
+/vehicle  — Show vehicle registration data (plate + talon required)
 
 <b>Admin only:</b>
 /approve &lt;id&gt;, /deny &lt;id&gt;, /pending, /users, /myip

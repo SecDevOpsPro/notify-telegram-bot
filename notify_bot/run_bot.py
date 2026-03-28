@@ -35,8 +35,12 @@ from notify_bot.handlers.eur import eur_command
 from notify_bot.handlers.obligations import (
     clamp_command,
     driver_command,
+    fines_command,
+    gtp_command,
+    mtpl_command,
     plate_command,
     sticker_command,
+    vehicle_command,
     vignette_command,
 )
 from notify_bot.scheduler.jobs import daily_obligations_report
@@ -113,6 +117,10 @@ async def _post_init(application: Application) -> None:
             BotCommand("vignette", "Check road e-vignette (bgtoll.bg)"),
             BotCommand("sticker", "Check Sofia parking sticker"),
             BotCommand("clamp", "Check wheel-clamp status"),
+            BotCommand("gtp", "Check technical inspection validity"),
+            BotCommand("mtpl", "Check civil liability (MTPL) insurance"),
+            BotCommand("fines", "Check traffic fines (KAT)"),
+            BotCommand("vehicle", "Show vehicle registration data"),
             BotCommand("myip", "Show bot's public IP (admin only)"),
         ]
     )
@@ -168,6 +176,10 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("vignette", vignette_command))
     application.add_handler(CommandHandler("sticker", sticker_command))
     application.add_handler(CommandHandler("clamp", clamp_command))
+    application.add_handler(CommandHandler("gtp", gtp_command))
+    application.add_handler(CommandHandler("mtpl", mtpl_command))
+    application.add_handler(CommandHandler("fines", fines_command))
+    application.add_handler(CommandHandler("vehicle", vehicle_command))
 
     # ── Inline button callbacks ───────────────────────────────────────────────
     # Pattern must be registered before a generic catch-all if one were added

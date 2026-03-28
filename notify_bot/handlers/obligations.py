@@ -445,10 +445,13 @@ async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             profile["vehicle_plate"], profile["talon_no"]
         )
     except BoleronNotFoundError:
+        plate = profile["vehicle_plate"]
+        talon = profile["talon_no"]
         await update.message.reply_html(
             "⚠️ <b>Vehicle not found.</b>\n\n"
-            "The plate and talon number don't match any vehicle in the registry.\n"
-            "Use /enroll to update your talon number."
+            f"No data found for plate <code>{plate}</code> / talon <code>{talon}</code> "
+            "in the boleron.bg database.\n\n"
+            "This vehicle may not be registered in their system yet."
         )
         return
     except BoleronError as exc:

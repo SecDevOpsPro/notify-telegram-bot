@@ -117,7 +117,7 @@ class BoleronError(Exception):
 
 
 class BoleronNotFoundError(BoleronError):
-    """Raised when the API returns 500 (typically mismatched plate/talon)."""
+    """Raised when the API returns 500 (vehicle not found in boleron database)."""
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -161,7 +161,7 @@ async def _get(path: str, params: dict, *, base: str = _API_BASE) -> dict:
         raise BoleronError(f"Request error: {exc}") from exc
 
     if resp.status_code == 500:
-        raise BoleronNotFoundError(f"No data returned from {path} (plate/talon mismatch?)")
+        raise BoleronNotFoundError(f"Vehicle not found in boleron database ({path})")
     if resp.status_code != 200:
         raise BoleronError(f"HTTP {resp.status_code} from {path}")
 
@@ -173,7 +173,7 @@ async def _get(path: str, params: dict, *, base: str = _API_BASE) -> dict:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-_TIME_SUFFIX_RE = re.compile(r"\s+\d{1,2}:\d{2}:\d{2}$")
+_TIME_SUFFIX_RE = re.compile(r"\s+\d{1,2}:\d{2}:\d{2}[^\d]*$")
 _NON_DIGIT_TAIL_RE = re.compile(r"[^\d]+$")
 
 
@@ -281,7 +281,7 @@ async def check_gtp(car_no: str) -> GtpInfo:
         return GtpInfo(found=False)
     return GtpInfo(
         found=True,
-        valid_to=data.get("validToFormated") or _clean_date(data.get("validTo")),
+        valid_to=_clean_date(data.get("validToFormated") or data.get("validTo")),
     )
 
 

@@ -21,7 +21,7 @@ dependencies = [
   # Templating
   "jinja2>=3.1",
   # Telegram bot framework
-  "python-telegram-bot[job-queue]==22.6",
+  "python-telegram-bot[job-queue]==22.7",
   # Pinned transitive deps
   "anyio==4.12.1",
   "cachetools==7.0.1",

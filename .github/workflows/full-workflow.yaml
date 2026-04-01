@@ -92,7 +92,7 @@
               version: "0.9.17"
               enable-cache: true
           - name: Login to Gitea Container Registry
-            uses: 'docker/login-action@v3'
+            uses: 'docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2' # v4
             with:
               registry: ${{ github.server_url }}
               username: '${{ github.repository_owner }}'

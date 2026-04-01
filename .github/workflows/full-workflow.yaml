@@ -107,7 +107,7 @@
               echo "REPO_OWNER=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           - name: Extract metadata
             id: meta
-            uses: docker/metadata-action@v5
+            uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6
             with:
               images: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}
               tags: |

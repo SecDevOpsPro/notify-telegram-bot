@@ -30,7 +30,7 @@
           - name: Install uv
             uses: astral-sh/setup-uv@v7
             with:
-              version: "0.9.17"
+              version: "0.11.3"
               enable-cache: true
           - name: Build python package
             run: |
@@ -89,7 +89,7 @@
           - name: Install uv
             uses: astral-sh/setup-uv@v7
             with:
-              version: "0.9.17"
+              version: "0.11.3"
               enable-cache: true
           - name: Login to Gitea Container Registry
             uses: 'docker/login-action@v3'

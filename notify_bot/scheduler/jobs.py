@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date, datetime
 from typing import Any, Callable, Coroutine, Type
 
 from telegram.ext import ContextTypes
@@ -51,6 +52,32 @@ _RETRY_ATTEMPTS: int = 3
 
 #: Base delay (seconds) for exponential backoff — doubles each attempt.
 _RETRY_BASE_DELAY: float = 5.0
+
+#: Days remaining threshold below which an expiry warning is shown.
+_EXPIRY_WARN_DAYS: int = 14
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _days_until(date_str: str | None) -> int | None:
+    """
+    Return the number of days between today and *date_str*.
+
+    Accepts ``dd.mm.yyyy`` (Bulgarian display format) and
+    ``yyyy-mm-dd`` / ISO-8601 strings.  Returns ``None`` when the
+    input is absent or unparseable.
+    """
+    if not date_str:
+        return None
+    today = date.today()
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            exp = datetime.strptime(date_str[:10], fmt).date()
+            return (exp - today).days
+        except ValueError:
+            continue
+    return None
+
 
 # ── Retry helper ──────────────────────────────────────────────────────────────
 
@@ -146,6 +173,11 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
                     )
                 if vignette.vignette_type:
                     vignette_lines.append(f"📋 Type: {vignette.vignette_type}")
+                remaining = _days_until(vignette.validity_date_to)
+                if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
+                    vignette_lines.append(
+                        f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!"
+                    )
                 sections.append("\n".join(vignette_lines))
             else:
                 sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
@@ -166,6 +198,11 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
                         bv_lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
                     if bv.price:
                         bv_lines.append(f"💰 Price: {bv.price}")
+                    remaining = _days_until(bv.valid_to)
+                    if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
+                        bv_lines.append(
+                            f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!"
+                        )
                     sections.append("\n".join(bv_lines))
                 else:
                     sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
@@ -214,7 +251,13 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             gtp = await _retry(check_gtp, plate)
             if gtp.found:
-                sections.append(f"🔧 <b>Technical Inspection ({plate}):</b>\n✅ Valid to: {gtp.valid_to}")
+                gtp_lines = [f"🔧 <b>Technical Inspection ({plate}):</b>", f"✅ Valid to: {gtp.valid_to}"]
+                remaining = _days_until(gtp.valid_to)
+                if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
+                    gtp_lines.append(
+                        f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!"
+                    )
+                sections.append("\n".join(gtp_lines))
             else:
                 sections.append(f"🔧 <b>Technical Inspection ({plate}):</b>\n❌ No valid inspection found.")
         except BoleronError as exc:
@@ -232,6 +275,11 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
                 mtpl_lines.append(f"🏢 {mtpl.insurer}")
             if mtpl.valid_to:
                 mtpl_lines.append(f"📅 Valid to: {mtpl.valid_to}")
+            remaining = _days_until(mtpl.valid_to)
+            if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
+                mtpl_lines.append(
+                    f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!"
+                )
             sections.append("\n".join(mtpl_lines))
         except BoleronError as exc:
             logger.warning("MTPL check failed for user %s: %s", uid, exc)

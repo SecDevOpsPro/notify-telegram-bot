@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import date, datetime
 from typing import Any, Callable, Coroutine, Type
 
@@ -30,9 +31,16 @@ from notify_bot.services.boleron import (
     check_mtpl,
     check_vignette_boleron,
 )
-from notify_bot.services.mvr import MVRApiError, check_by_licence, check_by_plate, render_obligations
+from notify_bot.services.mvr import (
+    MVRApiError,
+    check_by_licence,
+    check_by_plate,
+    render_obligations,
+)
 from notify_bot.services.sofiatraffic import (
     CloudflareError as SofiaCloudflareError,
+)
+from notify_bot.services.sofiatraffic import (
     SofiaTrafficError,
     check_sticker_and_clamp,
 )
@@ -42,7 +50,7 @@ logger = logging.getLogger(__name__)
 # ── Tuning knobs ──────────────────────────────────────────────────────────────
 
 #: Seconds between each user's report job (spreads API calls across time).
-_USER_STAGGER: int = 260
+_USER_STAGGER: int = 420
 
 #: Seconds to sleep between individual API calls within one user's report.
 _INTER_CHECK_DELAY: float = 3.0
@@ -157,9 +165,7 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if plate:
         try:
-            vignette = await _retry(
-                check_vignette, plate, skip_on=(CloudflareBlockedError,)
-            )
+            vignette = await _retry(check_vignette, plate, skip_on=(CloudflareBlockedError,))
             if vignette.found:
                 status_icon = "✅" if vignette.is_valid else "❌"
                 status_label = "Active" if vignette.is_valid else "Inactive"
@@ -182,7 +188,9 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
             else:
                 sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
         except (CloudflareBlockedError, BgtollError) as exc:
-            logger.debug("Vignette check failed for user %s (%s) — falling back to boleron", uid, exc)
+            logger.debug(
+                "Vignette check failed for user %s (%s) — falling back to boleron", uid, exc
+            )
             try:
                 bv: BoleronVignetteInfo = await _retry(check_vignette_boleron, plate)
                 if bv.found:
@@ -251,7 +259,10 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             gtp = await _retry(check_gtp, plate)
             if gtp.found:
-                gtp_lines = [f"🔧 <b>Technical Inspection ({plate}):</b>", f"✅ Valid to: {gtp.valid_to}"]
+                gtp_lines = [
+                    f"🔧 <b>Technical Inspection ({plate}):</b>",
+                    f"✅ Valid to: {gtp.valid_to}",
+                ]
                 remaining = _days_until(gtp.valid_to)
                 if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
                     gtp_lines.append(
@@ -259,7 +270,9 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
                     )
                 sections.append("\n".join(gtp_lines))
             else:
-                sections.append(f"🔧 <b>Technical Inspection ({plate}):</b>\n❌ No valid inspection found.")
+                sections.append(
+                    f"🔧 <b>Technical Inspection ({plate}):</b>\n❌ No valid inspection found."
+                )
         except BoleronError as exc:
             logger.warning("GTP check failed for user %s: %s", uid, exc)
         await asyncio.sleep(_INTER_CHECK_DELAY)
@@ -277,9 +290,7 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
                 mtpl_lines.append(f"📅 Valid to: {mtpl.valid_to}")
             remaining = _days_until(mtpl.valid_to)
             if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
-                mtpl_lines.append(
-                    f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!"
-                )
+                mtpl_lines.append(f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!")
             sections.append("\n".join(mtpl_lines))
         except BoleronError as exc:
             logger.warning("MTPL check failed for user %s: %s", uid, exc)
@@ -323,14 +334,15 @@ async def daily_obligations_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     sofiatraffic.bg APIs when many users are checked simultaneously.
     """
     users = await db.get_all_approved_with_profiles()
-    logger.info(
-        "Daily report: scheduling %d user report(s), %ds apart", len(users), _USER_STAGGER
-    )
+    logger.info("Daily report: scheduling %d user report(s), %ds apart", len(users), _USER_STAGGER)
 
     for i, user in enumerate(users):
         context.job_queue.run_once(  # type: ignore[union-attr]
             _send_user_report,
-            when=i * _USER_STAGGER,  # int seconds from now; 0 = immediate, 60 = in 60s, …
+            when=i
+            * random.randint(
+                240, _USER_STAGGER
+            ),  # int seconds from now; 0 = immediate, 60 = in 60s, …
             data=user,
             name=f"report_user_{user['user_id']}",
         )

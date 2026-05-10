@@ -41,9 +41,9 @@ _BROWSER_HEADERS = {
     "Referer": "https://www.sofiatraffic.bg/en/parking",
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
     ),
-    "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+    "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="147", "Chromium";v="147"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Linux"',
 }
@@ -58,9 +58,9 @@ _XHR_HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
     ),
-    "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+    "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="147", "Chromium";v="147"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Linux"',
     "sec-fetch-dest": "empty",
@@ -268,9 +268,7 @@ async def _get_cookies_via_flaresolverr() -> tuple[dict, str]:
         raise SofiaTrafficError(f"FlareSolverr connection error: {exc}") from exc
 
     if resp.status_code != 200:
-        raise CsrfFetchError(
-            f"FlareSolverr returned HTTP {resp.status_code}"
-        )
+        raise CsrfFetchError(f"FlareSolverr returned HTTP {resp.status_code}")
 
     try:
         data = resp.json()
@@ -280,10 +278,7 @@ async def _get_cookies_via_flaresolverr() -> tuple[dict, str]:
     if data.get("status") != "ok":
         raise CsrfFetchError(f"FlareSolverr failed: {data.get('message', 'unknown error')}")
 
-    cookies: dict = {
-        c["name"]: c["value"]
-        for c in data.get("solution", {}).get("cookies", [])
-    }
+    cookies: dict = {c["name"]: c["value"] for c in data.get("solution", {}).get("cookies", [])}
     xsrf_raw = cookies.get("XSRF-TOKEN")
     if not xsrf_raw:
         raise CsrfFetchError("FlareSolverr: XSRF-TOKEN not found in cookies")
@@ -313,12 +308,8 @@ def _parse_json_response(resp: httpx.Response) -> dict:
     if "json" not in content_type:
         snippet = resp.text[:300]
         if "cloudflare" in snippet.lower() or "challenge" in snippet.lower():
-            raise CloudflareError(
-                "Cloudflare challenge page returned instead of JSON response."
-            )
-        raise SofiaTrafficError(
-            f"API returned non-JSON content-type '{content_type}': {snippet!r}"
-        )
+            raise CloudflareError("Cloudflare challenge page returned instead of JSON response.")
+        raise SofiaTrafficError(f"API returned non-JSON content-type '{content_type}': {snippet!r}")
     try:
         return resp.json()
     except Exception as exc:

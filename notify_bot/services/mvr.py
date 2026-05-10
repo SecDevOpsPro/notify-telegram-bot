@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _BASE_URL = "https://e-uslugi.mvr.bg/api/Obligations/AND"
 
 _HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
     "Accept": "*/*",
     "Accept-Language": "en",
     "Referer": "https://e-uslugi.mvr.bg/en/services/obligations",

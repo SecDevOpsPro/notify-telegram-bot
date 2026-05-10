@@ -29,9 +29,7 @@ except (ValueError, TypeError) as _e:
 
 #: Session cookie for the MVR e-services API.  Rotate via env var when the
 #: cookie expires (symptom: MVR checks return empty results or auth errors).
-MVR_SESSION_ID: str = os.environ.get(
-    "MVR_SESSION_ID", "b5345242-002d-4cca-878a-991c3db0cf0e"
-)
+MVR_SESSION_ID: str = os.environ.get("MVR_SESSION_ID", "6cbf5ff2-9070-4aa8-896d-479bb79ad3a8")
 
 # ── Proxy / Cloudflare bypass ──────────────────────────────────────────────────
 

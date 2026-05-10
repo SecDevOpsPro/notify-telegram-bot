@@ -33,9 +33,9 @@ _HEADERS = {
     "Sec-Fetch-Site": "same-origin",
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
     ),
-    "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+    "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="147", "Chromium";v="147"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Linux"',
 }

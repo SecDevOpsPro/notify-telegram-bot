@@ -14,6 +14,7 @@ Inline callbacks:
 
 from __future__ import annotations
 
+import html
 import logging
 
 import httpx
@@ -23,6 +24,12 @@ from telegram.ext import ContextTypes
 from notify_bot import config, db
 
 logger = logging.getLogger(__name__)
+
+_APPROVED_MSG = (
+    "✅ Your access has been approved!\n"
+    "Use /enroll to save your personal data (ID, licence, plate), "
+    "then /help to see all available commands."
+)
 
 
 def _is_admin(user_id: int) -> bool:
@@ -59,9 +66,7 @@ async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(
         f"✅ User <code>{target_id}</code> approved.", parse_mode="HTML"
     )
-    await _notify_user(
-        context, target_id, "✅ Your access has been approved!  Use /help to get started."
-    )
+    await _notify_user(context, target_id, _APPROVED_MSG)
 
 
 async def deny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -95,7 +100,8 @@ async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     lines = [
-        f"• {u['first_name']} (@{u.get('username') or 'N/A'}) — <code>{u['user_id']}</code>"
+        f"• {html.escape(u['first_name'] or '')} "
+        f"(@{html.escape(u.get('username') or 'N/A')}) — <code>{u['user_id']}</code>"
         for u in users
     ]
     await update.message.reply_html(
@@ -114,7 +120,8 @@ async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     lines = [
-        f"• {u['first_name']} (@{u.get('username') or 'N/A'}) — <code>{u['user_id']}</code>"
+        f"• {html.escape(u['first_name'] or '')} "
+        f"(@{html.escape(u.get('username') or 'N/A')}) — <code>{u['user_id']}</code>"
         for u in users
     ]
     await update.message.reply_html("✅ <b>Approved users:</b>\n\n" + "\n".join(lines))
@@ -160,9 +167,7 @@ async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text(
             f"✅ Approved user <code>{target_id}</code>.", parse_mode="HTML"
         )
-        await _notify_user(
-            context, target_id, "✅ Your access has been approved!  Use /help to get started."
-        )
+        await _notify_user(context, target_id, _APPROVED_MSG)
     elif action == "deny":
         await db.set_user_status(target_id, "denied")
         await query.edit_message_text(

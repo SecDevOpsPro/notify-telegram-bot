@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -50,16 +51,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     status = record["status"] if record else "unknown"
 
     if status == "approved":
-        msg = (
-            f"👋 Hello, {user.first_name}!\n\n"
-            "✅ You're approved.\n"
-            "Use /help to see all available commands."
+        profile = await db.get_profile(user.id)
+        has_profile = bool(
+            profile
+            and any(
+                profile.get(field)
+                for field in ("national_id", "driving_licence", "vehicle_plate", "talon_no")
+            )
         )
+        if has_profile:
+            msg = (
+                f"👋 Hello, {user.first_name}!\n\n"
+                "✅ You're approved.\n"
+                "Use /help to see all available commands."
+            )
+        else:
+            msg = (
+                f"👋 Hello, {user.first_name}!\n\n"
+                "✅ You're approved!\n"
+                "Use /enroll to save your personal data (ID, licence, plate), "
+                "then /help to see all available commands."
+            )
     elif status == "pending":
         msg = (
             f"👋 Hello, {user.first_name}!\n\n"
             "⏳ Your access request is pending approval.\n"
-            "You'll be notified when the admin reviews it."
+            "You'll be notified here once the admin reviews it — "
+            "then use /enroll to save your data."
         )
     elif status == "denied":
         msg = (
@@ -71,7 +89,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = (
             f"👋 Hello, {user.first_name}!\n\n"
             "This is a private bot.\n"
-            "Use /request to ask the admin for access."
+            "1️⃣ Use /request to ask the admin for access.\n"
+            "2️⃣ Once approved, use /enroll to save your data."
         )
 
     await update.message.reply_text(msg)
@@ -88,18 +107,24 @@ async def request_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     Approve / Deny buttons.
     """
     user = update.effective_user
-    if not user:
+    message = update.effective_message
+    if not user or not message:
         return
+
+    logger.info("Access request received from user %s (@%s)", user.id, user.username)
 
     await db.upsert_user(user.id, user.username, user.first_name)
     record = await db.get_user(user.id)
 
     if record and record["status"] == "approved":
-        await update.message.reply_text("✅ You already have access!  Use /help to get started.")
+        await message.reply_text("✅ You already have access!  Use /help to get started.")
         return
 
     if config.ADMIN_TELEGRAM_ID == 0:
-        await update.message.reply_text(
+        logger.warning(
+            "Access request from user %s but no ADMIN_TELEGRAM_ID is configured", user.id
+        )
+        await message.reply_text(
             "⚠️ No admin is configured for this bot.  Please contact the owner directly."
         )
         return
@@ -113,27 +138,35 @@ async def request_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ]
     )
 
+    safe_name = html.escape(user.first_name or "")
+    safe_username = html.escape(user.username) if user.username else "N/A"
+
     try:
         await context.bot.send_message(
             chat_id=config.ADMIN_TELEGRAM_ID,
             text=(
                 f"🔔 <b>New access request</b>\n\n"
-                f"Name:     {user.first_name}\n"
-                f"Username: @{user.username or 'N/A'}\n"
+                f"Name:     {safe_name}\n"
+                f"Username: @{safe_username}\n"
                 f"User ID:  <code>{user.id}</code>"
             ),
             parse_mode="HTML",
             reply_markup=keyboard,
         )
     except Exception:
-        logger.exception("Could not reach admin (id=%s)", config.ADMIN_TELEGRAM_ID)
-        await update.message.reply_text(
+        logger.exception(
+            "Could not notify admin (id=%s) of access request from user %s",
+            config.ADMIN_TELEGRAM_ID,
+            user.id,
+        )
+        await message.reply_text(
             "⚠️ Could not reach the admin right now.  Please try again later."
         )
         return
 
     await db.set_user_status(user.id, "pending")
-    await update.message.reply_text(
+    logger.info("Access request from user %s forwarded to admin", user.id)
+    await message.reply_text(
         "📨 Your request has been sent to the admin.\n"
         "You'll receive a message here once it's reviewed."
     )

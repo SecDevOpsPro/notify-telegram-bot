@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1@sha256:4a43a54dd1fedceb30ba47e76cfcf2b47304f4161c0caeac2db1c61804ea3c91
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
 # docker buildx build . -f "Dockerfile" --platform linux/amd64 --no-cache -t notify-bot \
 #   --build-arg CREATED="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" --build-arg APP_VERSION=1.0.0

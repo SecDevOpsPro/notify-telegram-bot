@@ -23,7 +23,7 @@ dependencies = [
   # Telegram bot framework
   "python-telegram-bot[job-queue]==22.8",
   # Pinned transitive deps
-  "anyio==4.13.0",
+  "anyio==4.14.0",
   "cachetools==7.1.4",
   "certifi==2026.5.20",
   "h11==0.16.0",

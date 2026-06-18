@@ -25,7 +25,7 @@ dependencies = [
   # Pinned transitive deps
   "anyio==4.14.0",
   "cachetools==7.1.4",
-  "certifi==2026.5.20",
+  "certifi==2026.6.17",
   "h11==0.16.0",
   "h2==4.3.0",
   "hpack==4.1.0",

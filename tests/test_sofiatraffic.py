@@ -11,7 +11,6 @@ import httpx
 import pytest
 
 from notify_bot.services.sofiatraffic import (
-    ClampInfo,
     CloudflareError,
     CsrfFetchError,
     SofiaTrafficError,
@@ -21,7 +20,6 @@ from notify_bot.services.sofiatraffic import (
     check_clamp,
     check_sticker,
 )
-
 
 # ── _parse_sticker ─────────────────────────────────────────────────────────────
 
@@ -137,6 +135,18 @@ class TestParseClamp:
         data = {"clamped": False}
         result = _parse_clamp("CB1234AB", data)
         assert result.clamped is False
+
+    def test_top_level_clamped_string_false(self):
+        data = {"clamped": "false"}
+        result = _parse_clamp("CB1234AB", data)
+        assert result.found is True
+        assert result.clamped is False
+
+    def test_top_level_clamped_string_true(self):
+        data = {"clamped": "true"}
+        result = _parse_clamp("CB1234AB", data)
+        assert result.found is True
+        assert result.clamped is True
 
     def test_empty_dict_returns_not_found(self):
         result = _parse_clamp("CB1234AB", {})

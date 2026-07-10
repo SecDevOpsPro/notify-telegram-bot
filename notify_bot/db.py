@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import aiosqlite
@@ -52,19 +53,24 @@ def _db_path() -> str:
     return _self.DATABASE_PATH
 
 
+async def _column_exists(conn: aiosqlite.Connection, table: str, column: str) -> bool:
+    """Return whether *column* exists in *table* using SQLite metadata."""
+    async with conn.execute(f"PRAGMA table_info({table})") as cur:
+        rows = await cur.fetchall()
+    return any(row[1] == column for row in rows)
+
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 
 async def init_db() -> None:
     """Create tables on first run."""
+    Path(_db_path()).parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(_db_path()) as db:
         await db.execute(_CREATE_USERS)
         await db.execute(_CREATE_PROFILES)
         # Migrate: add talon_no if it doesn't exist yet (idempotent)
-        try:
+        if not await _column_exists(db, "user_profiles", "talon_no"):
             await db.execute(_ADD_TALON_COLUMN)
-        except Exception:
-            pass  # Column already exists
         await db.commit()
 
 

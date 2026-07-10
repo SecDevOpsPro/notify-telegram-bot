@@ -6,7 +6,6 @@ import pytest
 
 from notify_bot import db
 
-
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 
@@ -147,3 +146,14 @@ async def test_get_all_approved_with_profiles(tmp_db):
 
     assert len(rows) == 1
     assert rows[0]["user_id"] == 10
+
+
+@pytest.mark.asyncio
+async def test_init_db_creates_missing_parent_directory(tmp_path, monkeypatch):
+    db_path = tmp_path / "nested" / "state" / "bot.db"
+    monkeypatch.setattr(db, "DATABASE_PATH", str(db_path))
+
+    await db.init_db()
+
+    assert db_path.exists()
+    assert db_path.parent.exists()

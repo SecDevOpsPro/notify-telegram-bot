@@ -89,6 +89,25 @@ class CsrfFetchError(SofiaTrafficError):
     """Raised when the XSRF-TOKEN cookie cannot be obtained from the parking page."""
 
 
+def _coerce_bool(value: object) -> bool | None:
+    """Best-effort conversion for API booleans that may arrive as strings."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized in {"1", "true", "yes", "y", "on", "active", "valid"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", "inactive", "invalid"}:
+            return False
+    return bool(value)
+
+
 # ── Data classes ──────────────────────────────────────────────────────────────
 
 
@@ -200,12 +219,19 @@ def _parse_clamp(plate: str, data: dict) -> ClampInfo:
 
     if not payload:
         # Check for a boolean "clamped" field at top level
-        clamped_flag = data.get("clamped") or data.get("isClamped") or data.get("is_clamped")
+        clamped_flag = next(
+            (
+                data.get(key)
+                for key in ("clamped", "isClamped", "is_clamped")
+                if data.get(key) is not None
+            ),
+            None,
+        )
         if clamped_flag is not None:
             return ClampInfo(
                 plate=plate,
                 found=True,
-                clamped=bool(clamped_flag),
+                clamped=bool(_coerce_bool(clamped_flag)),
                 raw=data,
             )
         return ClampInfo(plate=plate, found=False, clamped=False, raw=data)
@@ -217,13 +243,15 @@ def _parse_clamp(plate: str, data: dict) -> ClampInfo:
                 return str(v)
         return None
 
-    clamped = bool(
-        payload.get("clamped")
-        or payload.get("isClamped")
-        or payload.get("is_clamped")
-        or payload.get("clampedAt")
-        or payload.get("clamped_at")
+    clamped_flag = next(
+        (
+            payload.get(key)
+            for key in ("clamped", "isClamped", "is_clamped", "clampedAt", "clamped_at")
+            if payload.get(key) is not None
+        ),
+        None,
     )
+    clamped = bool(_coerce_bool(clamped_flag))
 
     return ClampInfo(
         plate=plate,

@@ -24,7 +24,7 @@ dependencies = [
   "python-telegram-bot[job-queue]==22.8",
   # Pinned transitive deps
   "anyio==4.14.2",
-  "cachetools==7.1.4",
+  "cachetools==7.1.6",
   "certifi==2026.7.22",
   "h11==0.16.0",
   "h2==4.3.0",

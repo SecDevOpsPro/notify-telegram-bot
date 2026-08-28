@@ -42,3 +42,10 @@ home.sh
 !scripts
 # Auto-generated during builds
 /notify_bot/_version.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/

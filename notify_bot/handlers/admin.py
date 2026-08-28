@@ -62,7 +62,13 @@ async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("❌ Invalid user ID.")
         return
 
-    await db.set_user_status(target_id, "approved")
+    try:
+        await db.set_user_status(target_id, "approved")
+    except Exception:
+        logger.exception("Failed to approve user_id=%s", target_id)
+        await update.message.reply_text("⚠️ Something went wrong while approving that user.")
+        return
+
     await update.message.reply_text(
         f"✅ User <code>{target_id}</code> approved.", parse_mode="HTML"
     )
@@ -84,7 +90,13 @@ async def deny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Invalid user ID.")
         return
 
-    await db.set_user_status(target_id, "denied")
+    try:
+        await db.set_user_status(target_id, "denied")
+    except Exception:
+        logger.exception("Failed to deny user_id=%s", target_id)
+        await update.message.reply_text("⚠️ Something went wrong while denying that user.")
+        return
+
     await update.message.reply_text(f"❌ User <code>{target_id}</code> denied.", parse_mode="HTML")
     await _notify_user(context, target_id, "❌ Your access request was denied.")
 
@@ -162,14 +174,20 @@ async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text("⚠️ Malformed callback data.")
         return
 
+    try:
+        if action in ("approve", "deny"):
+            await db.set_user_status(target_id, "approved" if action == "approve" else "denied")
+    except Exception:
+        logger.exception("Failed to set status via callback for user_id=%s", target_id)
+        await query.edit_message_text("⚠️ Something went wrong processing that action.")
+        return
+
     if action == "approve":
-        await db.set_user_status(target_id, "approved")
         await query.edit_message_text(
             f"✅ Approved user <code>{target_id}</code>.", parse_mode="HTML"
         )
         await _notify_user(context, target_id, _APPROVED_MSG)
     elif action == "deny":
-        await db.set_user_status(target_id, "denied")
         await query.edit_message_text(
             f"❌ Denied user <code>{target_id}</code>.", parse_mode="HTML"
         )

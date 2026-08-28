@@ -46,8 +46,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     # Always register so the admin can see who contacted the bot
-    await db.upsert_user(user.id, user.username, user.first_name)
-    record = await db.get_user(user.id)
+    try:
+        await db.upsert_user(user.id, user.username, user.first_name)
+        record = await db.get_user(user.id)
+    except Exception:
+        logger.exception("Failed to register user_id=%s on /start", user.id)
+        await update.message.reply_text("⚠️ Something went wrong. Please try again.")
+        return
     status = record["status"] if record else "unknown"
 
     if status == "approved":
@@ -113,8 +118,13 @@ async def request_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     logger.info("Access request received from user %s (@%s)", user.id, user.username)
 
-    await db.upsert_user(user.id, user.username, user.first_name)
-    record = await db.get_user(user.id)
+    try:
+        await db.upsert_user(user.id, user.username, user.first_name)
+        record = await db.get_user(user.id)
+    except Exception:
+        logger.exception("Failed to register user_id=%s on /request", user.id)
+        await message.reply_text("⚠️ Something went wrong. Please try again.")
+        return
 
     if record and record["status"] == "approved":
         await message.reply_text("✅ You already have access!  Use /help to get started.")
@@ -164,7 +174,16 @@ async def request_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
-    await db.set_user_status(user.id, "pending")
+    try:
+        await db.set_user_status(user.id, "pending")
+    except Exception:
+        logger.exception("Failed to set pending status for user_id=%s", user.id)
+        await message.reply_text(
+            "⚠️ Your request reached the admin but we couldn't update your status. "
+            "Contact the admin if you don't hear back."
+        )
+        return
+
     logger.info("Access request from user %s forwarded to admin", user.id)
     await message.reply_text(
         "📨 Your request has been sent to the admin.\n"

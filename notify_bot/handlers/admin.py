@@ -152,6 +152,46 @@ async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_html("✅ <b>Approved users:</b>\n\n" + "\n".join(lines))
 
 
+async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/debug <user_id> — grant a user admin-level verbose error detail."""
+    if not _is_admin(update.effective_user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /debug <user_id>")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID.")
+        return
+
+    config.add_debug_user(target_id)
+    await update.message.reply_text(f"🐛 User {target_id} now gets verbose error detail.")
+
+
+async def undebug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/undebug <user_id> — revoke verbose error detail from a user."""
+    if not _is_admin(update.effective_user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /undebug <user_id>")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID.")
+        return
+
+    if config.remove_debug_user(target_id):
+        await update.message.reply_text(f"🐛 User {target_id} no longer gets verbose error detail.")
+    else:
+        await update.message.reply_text(f"ℹ️ User {target_id} wasn't in the debug list.")
+
+
 async def myip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/myip — show the public IP of the host running the bot."""
     if not _is_admin(update.effective_user.id):

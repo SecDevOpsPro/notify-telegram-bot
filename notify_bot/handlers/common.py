@@ -36,7 +36,8 @@ _HELP_PUBLIC = """
 /vehicle  — Show vehicle registration data (plate + talon required)
 
 <b>Admin only:</b>
-/approve &lt;id&gt;, /deny &lt;id&gt;, /pending, /users, /myip, /debug &lt;id&gt;, /undebug &lt;id&gt;
+/approve &lt;id&gt;, /deny &lt;id&gt;, /pending, /users, /myip
+/debug &lt;id&gt;, /undebug &lt;id&gt;
 """
 
 

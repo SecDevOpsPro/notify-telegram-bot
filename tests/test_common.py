@@ -21,6 +21,7 @@ def _make_update(
     update.effective_user.username = username
     update.effective_message = MagicMock()
     update.effective_message.reply_text = AsyncMock()
+    update.effective_message.reply_html = AsyncMock()
     update.message = update.effective_message
     return update
 
@@ -143,8 +144,9 @@ async def test_admin_unreachable_does_not_set_pending():
     ):
         await request_access(update, context)
 
-    update.effective_message.reply_text.assert_awaited_once()
-    assert "Could not reach the admin" in update.effective_message.reply_text.call_args[0][0]
+    update.effective_message.reply_html.assert_awaited_once()
+    assert "Could not reach the admin" in update.effective_message.reply_html.call_args[0][0]
+    update.effective_message.reply_text.assert_not_awaited()
     mock_set.assert_not_awaited()
 
 

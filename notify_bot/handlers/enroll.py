@@ -25,6 +25,7 @@ from telegram.ext import (
 )
 
 from notify_bot import db
+from notify_bot.errors import format_error
 from notify_bot.middlewares import require_approved
 
 # Exported for run_bot registration
@@ -190,15 +191,36 @@ async def _save_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     plate = context.user_data.pop("enroll_plate", None)
     talon = context.user_data.pop("enroll_talon", None)
 
-    await db.upsert_profile(
-        uid,
-        national_id=national_id,
-        driving_licence=licence,
-        vehicle_plate=plate,
-        talon_no=talon,
-    )
+    try:
+        await db.upsert_profile(
+            uid,
+            national_id=national_id,
+            driving_licence=licence,
+            vehicle_plate=plate,
+            talon_no=talon,
+        )
+        profile = await db.get_profile(uid)
+    except Exception as exc:
+        logger.exception("Failed to save profile for user_id=%s", uid)
+        await update.message.reply_html(
+            format_error(
+                uid,
+                "⚠️ Something went wrong while saving your data. Please try /enroll again, "
+                "or contact the admin if this keeps happening.",
+                exc,
+            )
+        )
+        return ConversationHandler.END
+    if profile is None:
+        # Save succeeded but the immediate re-fetch came back empty (e.g. a
+        # concurrent /unenroll raced us) — don't crash on profile.get(...).
+        logger.warning("Profile fetch returned no row right after save for user_id=%s", uid)
+        await update.message.reply_text(
+            "⚠️ Your data was saved, but we couldn't confirm the details. "
+            "Use /enroll to review them."
+        )
+        return ConversationHandler.END
 
-    profile = await db.get_profile(uid)
     await update.message.reply_html(
         "✅ <b>Profile saved!</b>\n\n"
         f"National ID:      <code>{profile.get('national_id') or '—'}</code>\n"
@@ -233,7 +255,20 @@ async def unenroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("ℹ️ You don't have any saved profile data to remove.")
         return
 
-    await db.delete_profile(uid)
+    try:
+        await db.delete_profile(uid)
+    except Exception as exc:
+        logger.exception("Failed to delete profile for user_id=%s", uid)
+        await update.message.reply_html(
+            format_error(
+                uid,
+                "⚠️ Something went wrong while deleting your data. Please try /unenroll again, "
+                "or contact the admin if this keeps happening.",
+                exc,
+            )
+        )
+        return
+
     await update.message.reply_text(
         "🗑️ Your profile data has been deleted.\n"
         "National ID, driving licence, vehicle plate and talon number have been removed.\n\n"

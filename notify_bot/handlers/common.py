@@ -9,6 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from notify_bot import config, db
+from notify_bot.errors import format_error
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ _HELP_PUBLIC = """
 
 <b>Admin only:</b>
 /approve &lt;id&gt;, /deny &lt;id&gt;, /pending, /users, /myip
+/debug &lt;id&gt;, /undebug &lt;id&gt;
 """
 
 
@@ -46,12 +48,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     # Always register so the admin can see who contacted the bot
-    await db.upsert_user(user.id, user.username, user.first_name)
-    record = await db.get_user(user.id)
+    try:
+        await db.upsert_user(user.id, user.username, user.first_name)
+        record = await db.get_user(user.id)
+    except Exception as exc:
+        logger.exception("Failed to register user_id=%s on /start", user.id)
+        await update.message.reply_html(
+            format_error(user.id, "⚠️ Something went wrong. Please try again.", exc)
+        )
+        return
     status = record["status"] if record else "unknown"
 
     if status == "approved":
-        profile = await db.get_profile(user.id)
+        try:
+            profile = await db.get_profile(user.id)
+        except Exception as exc:
+            logger.exception("Failed to fetch profile for user_id=%s on /start", user.id)
+            await update.message.reply_html(
+                format_error(user.id, "⚠️ Something went wrong. Please try again.", exc)
+            )
+            return
         has_profile = bool(
             profile
             and any(
@@ -113,8 +129,15 @@ async def request_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     logger.info("Access request received from user %s (@%s)", user.id, user.username)
 
-    await db.upsert_user(user.id, user.username, user.first_name)
-    record = await db.get_user(user.id)
+    try:
+        await db.upsert_user(user.id, user.username, user.first_name)
+        record = await db.get_user(user.id)
+    except Exception as exc:
+        logger.exception("Failed to register user_id=%s on /request", user.id)
+        await message.reply_html(
+            format_error(user.id, "⚠️ Something went wrong. Please try again.", exc)
+        )
+        return
 
     if record and record["status"] == "approved":
         await message.reply_text("✅ You already have access!  Use /help to get started.")
@@ -153,18 +176,35 @@ async def request_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             parse_mode="HTML",
             reply_markup=keyboard,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Could not notify admin (id=%s) of access request from user %s",
             config.ADMIN_TELEGRAM_ID,
             user.id,
         )
-        await message.reply_text(
-            "⚠️ Could not reach the admin right now.  Please try again later."
+        await message.reply_html(
+            format_error(
+                user.id,
+                "⚠️ Could not reach the admin right now.  Please try again later.",
+                exc,
+            )
         )
         return
 
-    await db.set_user_status(user.id, "pending")
+    try:
+        await db.set_user_status(user.id, "pending")
+    except Exception as exc:
+        logger.exception("Failed to set pending status for user_id=%s", user.id)
+        await message.reply_html(
+            format_error(
+                user.id,
+                "⚠️ Your request reached the admin but we couldn't update your status. "
+                "Contact the admin if you don't hear back.",
+                exc,
+            )
+        )
+        return
+
     logger.info("Access request from user %s forwarded to admin", user.id)
     await message.reply_text(
         "📨 Your request has been sent to the admin.\n"

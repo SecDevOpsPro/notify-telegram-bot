@@ -24,9 +24,11 @@ from notify_bot import config, db
 from notify_bot.handlers.admin import (
     approval_callback,
     approve_cmd,
+    debug_cmd,
     deny_cmd,
     myip_cmd,
     pending_cmd,
+    undebug_cmd,
     users_cmd,
 )
 from notify_bot.handlers.common import help_command, request_access, start
@@ -122,6 +124,8 @@ async def _post_init(application: Application) -> None:
             BotCommand("fines", "Check traffic fines (KAT)"),
             BotCommand("vehicle", "Show vehicle registration data"),
             BotCommand("myip", "Show bot's public IP (admin only)"),
+            BotCommand("debug", "Grant a user verbose error detail (admin only)"),
+            BotCommand("undebug", "Revoke a user's verbose error detail (admin only)"),
         ]
     )
     logger.info("Bot commands menu updated")
@@ -167,6 +171,8 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("pending", pending_cmd))
     application.add_handler(CommandHandler("users", users_cmd))
     application.add_handler(CommandHandler("myip", myip_cmd))
+    application.add_handler(CommandHandler("debug", debug_cmd))
+    application.add_handler(CommandHandler("undebug", undebug_cmd))
 
     # ── Feature commands ──────────────────────────────────────────────────────
     application.add_handler(CommandHandler("change", eur_command))

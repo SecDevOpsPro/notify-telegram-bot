@@ -22,6 +22,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from notify_bot import config, db
+from notify_bot.errors import format_error
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ _APPROVED_MSG = (
 
 
 def _is_admin(user_id: int) -> bool:
-    return config.ADMIN_TELEGRAM_ID != 0 and user_id == config.ADMIN_TELEGRAM_ID
+    return config.is_admin(user_id)
 
 
 async def _notify_user(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str) -> None:
@@ -62,7 +63,19 @@ async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("❌ Invalid user ID.")
         return
 
-    await db.set_user_status(target_id, "approved")
+    try:
+        await db.set_user_status(target_id, "approved")
+    except Exception as exc:
+        logger.exception("Failed to approve user_id=%s", target_id)
+        await update.message.reply_html(
+            format_error(
+                update.effective_user.id,
+                "⚠️ Something went wrong while approving that user.",
+                exc,
+            )
+        )
+        return
+
     await update.message.reply_text(
         f"✅ User <code>{target_id}</code> approved.", parse_mode="HTML"
     )
@@ -84,7 +97,19 @@ async def deny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Invalid user ID.")
         return
 
-    await db.set_user_status(target_id, "denied")
+    try:
+        await db.set_user_status(target_id, "denied")
+    except Exception as exc:
+        logger.exception("Failed to deny user_id=%s", target_id)
+        await update.message.reply_html(
+            format_error(
+                update.effective_user.id,
+                "⚠️ Something went wrong while denying that user.",
+                exc,
+            )
+        )
+        return
+
     await update.message.reply_text(f"❌ User <code>{target_id}</code> denied.", parse_mode="HTML")
     await _notify_user(context, target_id, "❌ Your access request was denied.")
 
@@ -127,6 +152,46 @@ async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_html("✅ <b>Approved users:</b>\n\n" + "\n".join(lines))
 
 
+async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/debug <user_id> — grant a user admin-level verbose error detail."""
+    if not _is_admin(update.effective_user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /debug <user_id>")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID.")
+        return
+
+    config.add_debug_user(target_id)
+    await update.message.reply_text(f"🐛 User {target_id} now gets verbose error detail.")
+
+
+async def undebug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/undebug <user_id> — revoke verbose error detail from a user."""
+    if not _is_admin(update.effective_user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /undebug <user_id>")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID.")
+        return
+
+    if config.remove_debug_user(target_id):
+        await update.message.reply_text(f"🐛 User {target_id} no longer gets verbose error detail.")
+    else:
+        await update.message.reply_text(f"ℹ️ User {target_id} wasn't in the debug list.")
+
+
 async def myip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/myip — show the public IP of the host running the bot."""
     if not _is_admin(update.effective_user.id):
@@ -162,14 +227,27 @@ async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text("⚠️ Malformed callback data.")
         return
 
+    try:
+        if action in ("approve", "deny"):
+            await db.set_user_status(target_id, "approved" if action == "approve" else "denied")
+    except Exception as exc:
+        logger.exception("Failed to set status via callback for user_id=%s", target_id)
+        await query.edit_message_text(
+            format_error(
+                update.effective_user.id,
+                "⚠️ Something went wrong processing that action.",
+                exc,
+            ),
+            parse_mode="HTML",
+        )
+        return
+
     if action == "approve":
-        await db.set_user_status(target_id, "approved")
         await query.edit_message_text(
             f"✅ Approved user <code>{target_id}</code>.", parse_mode="HTML"
         )
         await _notify_user(context, target_id, _APPROVED_MSG)
     elif action == "deny":
-        await db.set_user_status(target_id, "denied")
         await query.edit_message_text(
             f"❌ Denied user <code>{target_id}</code>.", parse_mode="HTML"
         )

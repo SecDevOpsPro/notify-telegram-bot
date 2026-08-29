@@ -16,6 +16,17 @@ def is_admin(user_id: int) -> bool:
     return ADMIN_TELEGRAM_ID != 0 and user_id == ADMIN_TELEGRAM_ID
 
 
+#: Extra Telegram user IDs (comma-separated) that get admin-level verbose
+#: error detail without being full admins.
+DEBUG_USER_IDS: frozenset[int] = frozenset(
+    int(_id) for _id in os.environ.get("DEBUG_USER_IDS", "").split(",") if _id.strip()
+)
+
+
+def is_debug_user(user_id: int) -> bool:
+    return is_admin(user_id) or user_id in DEBUG_USER_IDS
+
+
 # ── Storage ───────────────────────────────────────────────────────────────────
 DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "/app/data/bot.db")
 

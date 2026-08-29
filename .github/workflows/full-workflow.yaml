@@ -4,8 +4,6 @@
       push:
         branches: [ main ]
         tags: [ 'v*' ]
-      pull_request:
-        branches: [ main ]
     env:
       IMAGE_NAME: telegram-notify-bot
     jobs:
@@ -53,7 +51,6 @@
               echo "UV_PUBLISH_CHECK_URL=https://${USERNAME,,}:${{ secrets.REGISTRY_TOKEN }}@${PUBLISH_CHECK_URL#https://}/api/packages/${{ github.repository_owner }}/pypi/simple" >> $GITHUB_ENV
               echo "UV_PUBLISH_URL=${{ github.server_url }}/api/packages/${{ github.repository_owner }}/pypi" >> $GITHUB_ENV
           - name: Publish package to Gitea Package Registry with UV
-            if: github.event_name != 'pull_request'
             run: |
               source .venv/bin/activate
               # Configure UV for Gitea Package Registry https://docs.astral.sh/uv/reference/environment/#uv_publish_url
@@ -63,7 +60,6 @@
       build-and-push:
         runs-on: ubuntu-latest
         needs: python-test
-        if: github.event_name != 'pull_request'
         permissions:
           id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
           contents: read

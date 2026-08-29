@@ -211,6 +211,15 @@ async def _save_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
         )
         return ConversationHandler.END
+    if profile is None:
+        # Save succeeded but the immediate re-fetch came back empty (e.g. a
+        # concurrent /unenroll raced us) — don't crash on profile.get(...).
+        logger.warning("Profile fetch returned no row right after save for user_id=%s", uid)
+        await update.message.reply_text(
+            "⚠️ Your data was saved, but we couldn't confirm the details. "
+            "Use /enroll to review them."
+        )
+        return ConversationHandler.END
 
     await update.message.reply_html(
         "✅ <b>Profile saved!</b>\n\n"

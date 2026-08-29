@@ -260,6 +260,33 @@ async def test_start_approved_with_profile_skips_enroll_prompt():
 
 
 @pytest.mark.asyncio
+async def test_start_approved_profile_lookup_failure_is_reported():
+    """
+    Regression test: db.get_profile raising for an approved user must be
+    caught and reported, not left to propagate past start() unhandled.
+    """
+    update = _make_update(15)
+    context = _make_context()
+
+    with (
+        patch("notify_bot.handlers.common.db.upsert_user", new=AsyncMock()),
+        patch(
+            "notify_bot.handlers.common.db.get_user",
+            new=AsyncMock(return_value={"status": "approved"}),
+        ),
+        patch(
+            "notify_bot.handlers.common.db.get_profile",
+            new=AsyncMock(side_effect=Exception("db down")),
+        ),
+    ):
+        await start(update, context)
+
+    update.effective_message.reply_html.assert_awaited_once()
+    assert "went wrong" in update.effective_message.reply_html.call_args[0][0]
+    update.message.reply_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_start_denied_user_message_unchanged():
     update = _make_update(14)
     context = _make_context()

@@ -60,7 +60,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     status = record["status"] if record else "unknown"
 
     if status == "approved":
-        profile = await db.get_profile(user.id)
+        try:
+            profile = await db.get_profile(user.id)
+        except Exception as exc:
+            logger.exception("Failed to fetch profile for user_id=%s on /start", user.id)
+            await update.message.reply_html(
+                format_error(user.id, "⚠️ Something went wrong. Please try again.", exc)
+            )
+            return
         has_profile = bool(
             profile
             and any(

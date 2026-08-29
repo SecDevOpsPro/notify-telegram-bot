@@ -124,6 +124,8 @@ async def _post_init(application: Application) -> None:
             BotCommand("fines", "Check traffic fines (KAT)"),
             BotCommand("vehicle", "Show vehicle registration data"),
             BotCommand("myip", "Show bot's public IP (admin only)"),
+            BotCommand("debug", "Grant a user verbose error detail (admin only)"),
+            BotCommand("undebug", "Revoke a user's verbose error detail (admin only)"),
         ]
     )
     logger.info("Bot commands menu updated")

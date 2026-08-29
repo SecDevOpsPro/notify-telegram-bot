@@ -25,6 +25,7 @@ from telegram.ext import (
 )
 
 from notify_bot import db
+from notify_bot.errors import format_error
 from notify_bot.middlewares import require_approved
 
 # Exported for run_bot registration
@@ -199,11 +200,15 @@ async def _save_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             talon_no=talon,
         )
         profile = await db.get_profile(uid)
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to save profile for user_id=%s", uid)
-        await update.message.reply_text(
-            "⚠️ Something went wrong while saving your data. Please try /enroll again, "
-            "or contact the admin if this keeps happening."
+        await update.message.reply_html(
+            format_error(
+                uid,
+                "⚠️ Something went wrong while saving your data. Please try /enroll again, "
+                "or contact the admin if this keeps happening.",
+                exc,
+            )
         )
         return ConversationHandler.END
 
@@ -243,11 +248,15 @@ async def unenroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     try:
         await db.delete_profile(uid)
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to delete profile for user_id=%s", uid)
-        await update.message.reply_text(
-            "⚠️ Something went wrong while deleting your data. Please try /unenroll again, "
-            "or contact the admin if this keeps happening."
+        await update.message.reply_html(
+            format_error(
+                uid,
+                "⚠️ Something went wrong while deleting your data. Please try /unenroll again, "
+                "or contact the admin if this keeps happening.",
+                exc,
+            )
         )
         return
 

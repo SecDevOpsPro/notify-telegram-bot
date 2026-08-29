@@ -11,6 +11,11 @@ TOKEN: str = os.environ.get("TOKEN", "")
 #: Telegram user ID of the bot owner / administrator.
 ADMIN_TELEGRAM_ID: int = int(os.environ.get("ADMIN_TELEGRAM_ID", "0"))
 
+
+def is_admin(user_id: int) -> bool:
+    return ADMIN_TELEGRAM_ID != 0 and user_id == ADMIN_TELEGRAM_ID
+
+
 # ── Storage ───────────────────────────────────────────────────────────────────
 DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "/app/data/bot.db")
 

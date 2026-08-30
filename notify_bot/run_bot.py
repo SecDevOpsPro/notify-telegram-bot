@@ -71,6 +71,12 @@ def _register_atexit_logout(token: str) -> None:
     atexit.register(_logout)
 
 
+async def _post_shutdown(application: Application) -> None:
+    """Called by PTB after polling stops. Closes the shared DB connection."""
+    await db.close_db()
+    logger.info("Database connection closed")
+
+
 async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Global error handler. Stops the bot on Conflict (duplicate instance)."""
     err = context.error
@@ -154,6 +160,7 @@ def run_bot() -> None:
         .token(config.TOKEN)
         .concurrent_updates(True)
         .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
         .build()
     )
 

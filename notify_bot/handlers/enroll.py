@@ -40,7 +40,7 @@ ASK_NATIONAL_ID, ASK_LICENCE, ASK_PLATE, ASK_TALON = range(4)
 # ── Validation patterns ───────────────────────────────────────────────────────
 
 _EGN_RE = re.compile(r"^\d{10}$")
-_LICENCE_RE = re.compile(r"^\d{5,12}$")
+_LICENCE_RE = re.compile(r"^(?:\d{5,12}|[A-Z]{2}\d{7})$", re.IGNORECASE)
 _PLATE_RE = re.compile(r"^[A-Z]{1,3}\d{3,4}[A-Z]{0,3}$", re.IGNORECASE)
 _TALON_RE = re.compile(r"^\d{6,12}$")
 
@@ -89,7 +89,7 @@ async def _ask_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await update.message.reply_html(
         "📋 <b>Enrollment Wizard</b> — Step 2 of 4\n\n"
         f"Current Driving Licence: <code>{current}</code>\n\n"
-        "Please enter your <b>Driving Licence number</b> (digits only).\n"
+        "Please enter your <b>Driving Licence number</b> (digits only, or 2 letters + 7 digits e.g. <code>DA2277821</code>).\n"
         "Send /skip to keep the current value, or /cancel to quit."
     )
     return ASK_LICENCE
@@ -99,10 +99,11 @@ async def _ask_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def received_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = update.message.text.strip()
+    text = update.message.text.strip().upper()
     if not _LICENCE_RE.match(text):
         await update.message.reply_text(
-            "❌ Invalid licence number (5–12 digits).  Try again or /skip."
+            "❌ Invalid licence number (5–12 digits, or 2 letters + 7 digits e.g. DA2277821).  "
+            "Try again or /skip."
         )
         return ASK_LICENCE
 

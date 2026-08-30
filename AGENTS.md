@@ -2,6 +2,11 @@
 
 Guidance for AI coding agents working in this repository.
 
+> **Keep this file current.** If your change adds/removes/moves a module,
+> changes a core convention (e.g. the DB connection model, error handling,
+> access control), or alters setup/test/lint commands, update the relevant
+> section of this file in the same change — don't leave it to a separate ask.
+
 ## What this is
 
 A private Telegram bot (`notify_bot`) that checks Bulgarian government

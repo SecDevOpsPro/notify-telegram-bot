@@ -13,9 +13,10 @@ from notify_bot.errors import format_error
 
 logger = logging.getLogger(__name__)
 
-_HELP_PUBLIC = """
-<b>📖 Help</b>
+_HELP_HEADER_ADMIN = "<b>📖 Help</b> — Display the full command reference."
+_HELP_HEADER_USER = "<b>📖 Help</b> — Display the command reference."
 
+_HELP_PUBLIC = """
 <b>Public commands</b> (no approval needed):
 /start   — Welcome message
 /help    — Show this message
@@ -34,7 +35,9 @@ _HELP_PUBLIC = """
 /mtpl     — Check civil liability insurance — also: /mtpl &lt;plate&gt;
 /fines    — Check traffic fines (KAT)
 /vehicle  — Show vehicle registration data (plate + talon required)
+"""
 
+_HELP_ADMIN = """
 <b>Admin only:</b>
 /approve &lt;id&gt;, /deny &lt;id&gt;, /pending, /users, /myip
 /debug &lt;id&gt;, /undebug &lt;id&gt;
@@ -113,8 +116,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Display the full command reference."""
-    await update.message.reply_html(_HELP_PUBLIC)
+    """Display the full command reference for admins, or the command reference for non-admins."""
+    user = update.effective_user
+    is_admin = bool(user and config.is_admin(user.id))
+    header = _HELP_HEADER_ADMIN if is_admin else _HELP_HEADER_USER
+    text = header + _HELP_PUBLIC
+    if is_admin:
+        text += _HELP_ADMIN
+    await update.message.reply_html(text)
+
+
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Catch-all for /commands that don't match any registered handler."""
+    await update.message.reply_text("❓ Unknown command. Use /help to see all available commands.")
 
 
 async def request_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -14,8 +14,10 @@ Inline callbacks:
 
 from __future__ import annotations
 
+import functools
 import html
 import logging
+from typing import Awaitable, Callable
 
 import httpx
 from telegram import Update
@@ -32,9 +34,27 @@ _APPROVED_MSG = (
     "then /help to see all available commands."
 )
 
+_NOT_AUTHORISED_MSG = "⛔ Not authorised."
+
 
 def _is_admin(user_id: int) -> bool:
     return config.is_admin(user_id)
+
+
+_Handler = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
+
+
+def admin(handler: _Handler) -> _Handler:
+    """Reject non-admins with a standard message before running *handler*."""
+
+    @functools.wraps(handler)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _is_admin(update.effective_user.id):
+            await update.message.reply_text(_NOT_AUTHORISED_MSG)
+            return
+        await handler(update, context)
+
+    return wrapper
 
 
 async def _notify_user(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str) -> None:
@@ -48,11 +68,9 @@ async def _notify_user(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: s
 # ── Text commands ─────────────────────────────────────────────────────────────
 
 
+@admin
 async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/approve <user_id>"""
-    if not _is_admin(update.effective_user.id):
-        return
-
     if not context.args:
         await update.message.reply_text("Usage: /approve <user_id>")
         return
@@ -82,11 +100,9 @@ async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _notify_user(context, target_id, _APPROVED_MSG)
 
 
+@admin
 async def deny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/deny <user_id>"""
-    if not _is_admin(update.effective_user.id):
-        return
-
     if not context.args:
         await update.message.reply_text("Usage: /deny <user_id>")
         return
@@ -114,11 +130,9 @@ async def deny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _notify_user(context, target_id, "❌ Your access request was denied.")
 
 
+@admin
 async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/pending — list users awaiting approval."""
-    if not _is_admin(update.effective_user.id):
-        return
-
     users = await db.list_users_by_status("pending")
     if not users:
         await update.message.reply_text("No pending access requests.")
@@ -134,11 +148,9 @@ async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
+@admin
 async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/users — list all approved users."""
-    if not _is_admin(update.effective_user.id):
-        return
-
     users = await db.list_users_by_status("approved")
     if not users:
         await update.message.reply_text("No approved users yet.")
@@ -152,11 +164,9 @@ async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_html("✅ <b>Approved users:</b>\n\n" + "\n".join(lines))
 
 
+@admin
 async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/debug <user_id> — grant a user admin-level verbose error detail."""
-    if not _is_admin(update.effective_user.id):
-        return
-
     if not context.args:
         await update.message.reply_text("Usage: /debug <user_id>")
         return
@@ -171,11 +181,9 @@ async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"🐛 User {target_id} now gets verbose error detail.")
 
 
+@admin
 async def undebug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/undebug <user_id> — revoke verbose error detail from a user."""
-    if not _is_admin(update.effective_user.id):
-        return
-
     if not context.args:
         await update.message.reply_text("Usage: /undebug <user_id>")
         return
@@ -192,11 +200,9 @@ async def undebug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"ℹ️ User {target_id} wasn't in the debug list.")
 
 
+@admin
 async def myip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/myip — show the public IP of the host running the bot."""
-    if not _is_admin(update.effective_user.id):
-        return
-
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get("https://api.ipify.org")
@@ -217,7 +223,7 @@ async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
 
     if not _is_admin(update.effective_user.id):
-        await query.edit_message_text("⛔ Not authorised.")
+        await query.edit_message_text(_NOT_AUTHORISED_MSG)
         return
 
     try:

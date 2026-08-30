@@ -27,6 +27,7 @@ services:
       - DATABASE_PATH=${DATABASE_PATH:-/app/data/bot.db}
       - DAILY_REPORT_TIME=${DAILY_REPORT_TIME:-08:00}
       - LOGLEVEL=${LOGLEVEL:-INFO}
+      - LOG_FILE_PATH=${LOG_FILE_PATH:-/app/data/errors.log}
       # Cloudflare bypass via FlareSolverr REST API
       - FLARESOLVERR_URL=http://flaresolverr:8191
     volumes:

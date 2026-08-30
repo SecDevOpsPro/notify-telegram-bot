@@ -89,7 +89,7 @@ async def _ask_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await update.message.reply_html(
         "📋 <b>Enrollment Wizard</b> — Step 2 of 4\n\n"
         f"Current Driving Licence: <code>{current}</code>\n\n"
-        "Please enter your <b>Driving Licence number</b> (digits only, or 2 letters + 7 digits e.g. <code>DA2277821</code>).\n"
+        "Please enter your <b>Driving Licence number</b> (digits only, or 2 letters + 7 digits e.g. <code>DA2123456</code>).\n"
         "Send /skip to keep the current value, or /cancel to quit."
     )
     return ASK_LICENCE
@@ -102,7 +102,7 @@ async def received_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     text = update.message.text.strip().upper()
     if not _LICENCE_RE.match(text):
         await update.message.reply_text(
-            "❌ Invalid licence number (5–12 digits, or 2 letters + 7 digits e.g. DA2277821).  "
+            "❌ Invalid licence number (5–12 digits, or 2 letters + 7 digits e.g. DA2123456).  "
             "Try again or /skip."
         )
         return ASK_LICENCE

@@ -45,6 +45,28 @@ def remove_debug_user(user_id: int) -> bool:
 # ── Storage ───────────────────────────────────────────────────────────────────
 DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "/app/data/bot.db")
 
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+#: File that keeps only the most recent ERROR+ log records, rotated so it never
+#: grows unbounded. Lives on the same persisted volume as the database.
+LOG_FILE_PATH: str = os.environ.get("LOG_FILE_PATH", "/app/data/errors.log")
+
+_raw_log_max_bytes: str = os.environ.get("LOG_FILE_MAX_BYTES", "100000")
+try:
+    LOG_FILE_MAX_BYTES: int = int(_raw_log_max_bytes)
+except ValueError as _e:
+    raise ValueError(
+        f"Invalid LOG_FILE_MAX_BYTES={_raw_log_max_bytes!r}. Expected an integer number of bytes."
+    ) from _e
+
+_raw_log_backup_count: str = os.environ.get("LOG_FILE_BACKUP_COUNT", "1")
+try:
+    LOG_FILE_BACKUP_COUNT: int = int(_raw_log_backup_count)
+except ValueError as _e:
+    raise ValueError(
+        f"Invalid LOG_FILE_BACKUP_COUNT={_raw_log_backup_count!r}. Expected an integer."
+    ) from _e
+
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 _raw_time: str = os.environ.get("DAILY_REPORT_TIME", "08:00")
 try:

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import logging.handlers
 import os
 import pathlib
 import urllib.request
@@ -52,6 +53,31 @@ logging.basicConfig(
     level=os.environ.get("LOGLEVEL", "INFO").upper(),
 )
 logger = logging.getLogger(__name__)
+
+
+def _setup_error_file_handler() -> None:
+    """Attach a small rotating file handler for ERROR+ records, best-effort.
+
+    Deferred to bot startup (rather than import time) so importing this module
+    in environments without a writable LOG_FILE_PATH (local dev, CI, tests)
+    doesn't fail; a broken path just falls back to console-only logging.
+    """
+    try:
+        pathlib.Path(config.LOG_FILE_PATH).parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(
+            config.LOG_FILE_PATH,
+            maxBytes=config.LOG_FILE_MAX_BYTES,
+            backupCount=config.LOG_FILE_BACKUP_COUNT,
+        )
+        handler.setLevel(logging.ERROR)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        logging.getLogger().addHandler(handler)
+    except OSError as exc:
+        logger.warning(
+            "Could not set up error log file at %s: %s", config.LOG_FILE_PATH, exc
+        )
 
 
 def _register_atexit_logout(token: str) -> None:
@@ -154,6 +180,8 @@ def run_bot() -> None:
             "TOKEN environment variable is not set. "
             "Create a bot via @BotFather and export its token."
         )
+
+    _setup_error_file_handler()
 
     application = (
         Application.builder()

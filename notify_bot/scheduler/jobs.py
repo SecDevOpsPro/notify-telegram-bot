@@ -128,14 +128,17 @@ async def _retry(
 # ── Per-user report ───────────────────────────────────────────────────────────
 
 
-async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _build_report_message(user: dict) -> str | None:
     """
-    One-shot job: build and send the daily report for a single user.
+    Run all obligation checks for one user and compose the report text.
 
-    ``context.job.data`` must be a dict with keys:
+    ``user`` must be a dict with keys:
     ``user_id``, ``first_name``, ``national_id``, ``driving_licence``, ``vehicle_plate``.
+
+    Returns ``None`` when there is nothing to report (every check came back
+    clean or unavailable) — the "no news is good news" convention used
+    throughout this module.
     """
-    user: dict = context.job.data  # type: ignore[union-attr]
     uid: int = user["user_id"]
     name: str = user.get("first_name") or "there"
     national_id: str | None = user.get("national_id")
@@ -313,14 +316,47 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.warning("Fines check failed for user %s: %s", uid, exc)
 
     if not sections:
-        return
+        return None
 
-    message = f"☀️ Good morning, {name}!\n\n" + "\n\n".join(sections)
+    return f"☀️ Good morning, {name}!\n\n" + "\n\n".join(sections)
+
+
+async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    One-shot job: build and send the daily report for a single user.
+
+    ``context.job.data`` must be a dict with keys:
+    ``user_id``, ``first_name``, ``national_id``, ``driving_licence``, ``vehicle_plate``.
+    """
+    user: dict = context.job.data  # type: ignore[union-attr]
+    uid: int = user["user_id"]
+    message = await _build_report_message(user)
+    if message is None:
+        return
     try:
         await context.bot.send_message(chat_id=uid, text=message, parse_mode="HTML")
         logger.debug("Daily report sent to user %s", uid)
     except Exception as exc:
         logger.warning("Could not deliver daily report to user %s: %s", uid, exc)
+
+
+async def send_user_report_now(context: ContextTypes.DEFAULT_TYPE, user: dict) -> bool:
+    """
+    Build and immediately send one user's report, bypassing the job queue.
+
+    Public counterpart to ``_send_user_report`` for callers that need the
+    result synchronously — currently the admin ``/brief`` command — and
+    need to know whether a report was actually sent, since an empty result
+    is silent by design (see ``_build_report_message``).
+
+    Returns ``True`` if a report was sent, ``False`` if there was nothing
+    to report.
+    """
+    message = await _build_report_message(user)
+    if message is None:
+        return False
+    await context.bot.send_message(chat_id=user["user_id"], text=message, parse_mode="HTML")
+    return True
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────

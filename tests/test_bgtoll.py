@@ -15,7 +15,6 @@ from notify_bot.services.bgtoll import (
     check_vignette,
 )
 
-
 # ── _parse (pure function) ────────────────────────────────────────────────────
 
 
@@ -105,6 +104,23 @@ def test_vignette_info_is_valid(status, expected):
 def test_vignette_info_is_valid_false_when_not_found():
     info = VignetteInfo(plate="X", country="BG", found=False, status="VALID")
     assert info.is_valid is False
+
+
+def test_status_boolean_string_false_is_treated_as_false():
+    data = {"vignette": {"statusBoolean": "false", "status": "VALID"}}
+    result = _parse("CB1234AB", "BG", data)
+
+    assert result.found is True
+    assert result.status_boolean is False
+    assert result.is_valid is False
+
+
+def test_status_boolean_string_true_is_treated_as_true():
+    data = {"vignette": {"statusBoolean": "true", "status": "EXPIRED"}}
+    result = _parse("CB1234AB", "BG", data)
+
+    assert result.status_boolean is True
+    assert result.is_valid is True
 
 
 # ── check_vignette (mocked network) ──────────────────────────────────────────

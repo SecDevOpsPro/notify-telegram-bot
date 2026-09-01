@@ -57,6 +57,25 @@ class CloudflareBlockedError(BgtollError):
     """
 
 
+def _coerce_bool(value: object) -> bool | None:
+    """Best-effort conversion for API booleans that may arrive as strings."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized in {"1", "true", "yes", "y", "on", "active", "valid"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", "inactive", "invalid"}:
+            return False
+    return bool(value)
+
+
 # ── Data class ────────────────────────────────────────────────────────────────
 
 
@@ -148,7 +167,7 @@ def _parse(plate: str, country: str, data: dict) -> VignetteInfo:
         emission_class=_get("emissionsClass", "emissionClass", "emission", "euroClass"),
         vehicle_type=_get("vehicleType", "vehicleTypeCode", "vehicle", "vehicleCategory"),
         status=_get("status", "vignetteStatus", "state"),
-        status_boolean=bool(status_bool_raw) if status_bool_raw is not None else None,
+        status_boolean=_coerce_bool(status_bool_raw),
         raw=data,
     )
 

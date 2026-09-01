@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+
+import aiosqlite
 import pytest
 
 from notify_bot import db
-
 
 # ── Users ─────────────────────────────────────────────────────────────────────
 
@@ -147,3 +149,66 @@ async def test_get_all_approved_with_profiles(tmp_db):
 
     assert len(rows) == 1
     assert rows[0]["user_id"] == 10
+
+
+@pytest.mark.asyncio
+async def test_concurrent_profile_upserts_merge_fields(tmp_db):
+    """Concurrent partial upserts for the same user must not corrupt data."""
+    await db.init_db()
+    await db.upsert_user(42, "user42", "User 42")
+
+    await asyncio.gather(
+        db.upsert_profile(42, national_id="1111111111"),
+        db.upsert_profile(42, driving_licence="222222"),
+        db.upsert_profile(42, vehicle_plate="CB1234AB"),
+        db.get_profile(42),
+    )
+
+    profile = await db.get_profile(42)
+    assert profile is not None
+    assert profile["national_id"] == "1111111111"
+    assert profile["driving_licence"] == "222222"
+    assert profile["vehicle_plate"] == "CB1234AB"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_mixed_operations_do_not_raise(tmp_db):
+    """Concurrent reads, writes, and deletes must complete without error."""
+    await db.init_db()
+    await db.upsert_user(99, "user99", "User 99")
+    await db.upsert_profile(99, national_id="9999999999")
+
+    await asyncio.gather(
+        db.get_profile(99),
+        db.upsert_profile(99, talon_no="123456"),
+        db.get_user(99),
+        db.list_users_by_status("pending"),
+    )
+
+    profile = await db.get_profile(99)
+    assert profile is not None
+    assert profile["national_id"] == "9999999999"
+    assert profile["talon_no"] == "123456"
+
+
+@pytest.mark.asyncio
+async def test_init_db_enables_wal_mode(tmp_db):
+    await db.init_db()
+
+    async with aiosqlite.connect(tmp_db) as conn:
+        async with conn.execute("PRAGMA journal_mode") as cur:
+            row = await cur.fetchone()
+
+    assert row is not None
+    assert row[0].lower() == "wal"
+
+
+@pytest.mark.asyncio
+async def test_init_db_creates_missing_parent_directory(tmp_path, monkeypatch):
+    db_path = tmp_path / "nested" / "state" / "bot.db"
+    monkeypatch.setattr(db, "DATABASE_PATH", str(db_path))
+
+    await db.init_db()
+
+    assert db_path.exists()
+    assert db_path.parent.exists()

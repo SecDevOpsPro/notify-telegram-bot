@@ -105,7 +105,7 @@ async def check_by_licence(national_id: str, licence_number: str) -> list[Obliga
 
     Args:
         national_id:      10-digit Bulgarian EGN.
-        licence_number:   Driving licence number (digits only).
+        licence_number:   Driving licence number (digits only, or 2 letters + 7 digits).
 
     Returns:
         List of :class:`Obligation` objects (one per law group).

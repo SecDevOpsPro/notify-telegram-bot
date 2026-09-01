@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import logging.handlers
 import os
 import pathlib
 import urllib.request
@@ -24,9 +25,12 @@ from notify_bot import config, db
 from notify_bot.handlers.admin import (
     approval_callback,
     approve_cmd,
+    brief_cmd,
+    debug_cmd,
     deny_cmd,
     myip_cmd,
     pending_cmd,
+    undebug_cmd,
     users_cmd,
 )
 from notify_bot.handlers.common import help_command, request_access, start
@@ -52,6 +56,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _setup_error_file_handler() -> None:
+    """Attach a small rotating file handler for ERROR+ records, best-effort.
+
+    Deferred to bot startup (rather than import time) so importing this module
+    in environments without a writable LOG_FILE_PATH (local dev, CI, tests)
+    doesn't fail; a broken path just falls back to console-only logging.
+    """
+    try:
+        pathlib.Path(config.LOG_FILE_PATH).parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(
+            config.LOG_FILE_PATH,
+            maxBytes=config.LOG_FILE_MAX_BYTES,
+            backupCount=config.LOG_FILE_BACKUP_COUNT,
+        )
+        handler.setLevel(logging.ERROR)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        logging.getLogger().addHandler(handler)
+    except OSError as exc:
+        logger.warning(
+            "Could not set up error log file at %s: %s", config.LOG_FILE_PATH, exc
+        )
+
+
 def _register_atexit_logout(token: str) -> None:
     """Register a best-effort synchronous logout on process exit.
 
@@ -67,6 +96,12 @@ def _register_atexit_logout(token: str) -> None:
             pass
 
     atexit.register(_logout)
+
+
+async def _post_shutdown(application: Application) -> None:
+    """Called by PTB after polling stops. Closes the shared DB connection."""
+    await db.close_db()
+    logger.info("Database connection closed")
 
 
 async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -122,6 +157,9 @@ async def _post_init(application: Application) -> None:
             BotCommand("fines", "Check traffic fines (KAT)"),
             BotCommand("vehicle", "Show vehicle registration data"),
             BotCommand("myip", "Show bot's public IP (admin only)"),
+            BotCommand("debug", "Grant a user verbose error detail (admin only)"),
+            BotCommand("undebug", "Revoke a user's verbose error detail (admin only)"),
+            BotCommand("brief", "Run the daily report for a user now (admin only)"),
         ]
     )
     logger.info("Bot commands menu updated")
@@ -145,11 +183,14 @@ def run_bot() -> None:
             "Create a bot via @BotFather and export its token."
         )
 
+    _setup_error_file_handler()
+
     application = (
         Application.builder()
         .token(config.TOKEN)
         .concurrent_updates(True)
         .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
         .build()
     )
 
@@ -167,6 +208,9 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("pending", pending_cmd))
     application.add_handler(CommandHandler("users", users_cmd))
     application.add_handler(CommandHandler("myip", myip_cmd))
+    application.add_handler(CommandHandler("debug", debug_cmd))
+    application.add_handler(CommandHandler("undebug", undebug_cmd))
+    application.add_handler(CommandHandler("brief", brief_cmd))
 
     # ── Feature commands ──────────────────────────────────────────────────────
     application.add_handler(CommandHandler("change", eur_command))

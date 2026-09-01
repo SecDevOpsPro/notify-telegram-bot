@@ -11,8 +11,61 @@ TOKEN: str = os.environ.get("TOKEN", "")
 #: Telegram user ID of the bot owner / administrator.
 ADMIN_TELEGRAM_ID: int = int(os.environ.get("ADMIN_TELEGRAM_ID", "0"))
 
+
+def is_admin(user_id: int) -> bool:
+    return ADMIN_TELEGRAM_ID != 0 and user_id == ADMIN_TELEGRAM_ID
+
+
+#: Extra Telegram user IDs that get admin-level verbose error detail without
+#: being full admins.  Seeded from the env var at startup, then mutable at
+#: runtime via /debug and /undebug — kept in-memory (not the DB) so it still
+#: works when the failure being reported *is* a DB error.
+DEBUG_USER_IDS: set[int] = {
+    int(_id) for _id in os.environ.get("DEBUG_USER_IDS", "").split(",") if _id.strip()
+}
+
+
+def is_debug_user(user_id: int) -> bool:
+    return is_admin(user_id) or user_id in DEBUG_USER_IDS
+
+
+def add_debug_user(user_id: int) -> None:
+    DEBUG_USER_IDS.add(user_id)
+
+
+def remove_debug_user(user_id: int) -> bool:
+    """Return True if *user_id* was present and got removed."""
+    try:
+        DEBUG_USER_IDS.remove(user_id)
+        return True
+    except KeyError:
+        return False
+
+
 # ── Storage ───────────────────────────────────────────────────────────────────
 DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "/app/data/bot.db")
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+#: File that keeps only the most recent ERROR+ log records, rotated so it never
+#: grows unbounded. Lives on the same persisted volume as the database.
+LOG_FILE_PATH: str = os.environ.get("LOG_FILE_PATH", "/app/data/errors.log")
+
+_raw_log_max_bytes: str = os.environ.get("LOG_FILE_MAX_BYTES", "100000")
+try:
+    LOG_FILE_MAX_BYTES: int = int(_raw_log_max_bytes)
+except ValueError as _e:
+    raise ValueError(
+        f"Invalid LOG_FILE_MAX_BYTES={_raw_log_max_bytes!r}. Expected an integer number of bytes."
+    ) from _e
+
+_raw_log_backup_count: str = os.environ.get("LOG_FILE_BACKUP_COUNT", "1")
+try:
+    LOG_FILE_BACKUP_COUNT: int = int(_raw_log_backup_count)
+except ValueError as _e:
+    raise ValueError(
+        f"Invalid LOG_FILE_BACKUP_COUNT={_raw_log_backup_count!r}. Expected an integer."
+    ) from _e
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 _raw_time: str = os.environ.get("DAILY_REPORT_TIME", "08:00")

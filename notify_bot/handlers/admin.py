@@ -6,6 +6,7 @@ Commands:
     /deny    <user_id>   — deny a pending user
     /pending             — list users awaiting approval
     /users               — list all approved users
+    /brief [user_id]     — run today's daily report for one user right now
 
 Inline callbacks:
     approve:<user_id>    — sent via the access-request notification
@@ -25,6 +26,7 @@ from telegram.ext import ContextTypes
 
 from notify_bot import config, db
 from notify_bot.errors import format_error
+from notify_bot.scheduler.jobs import send_user_report_now
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +200,81 @@ async def undebug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"🐛 User {target_id} no longer gets verbose error detail.")
     else:
         await update.message.reply_text(f"ℹ️ User {target_id} wasn't in the debug list.")
+
+
+@admin
+async def brief_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/brief [user_id] — run today's daily report for one user right now.
+
+    Defaults to the calling admin's own profile when no user_id is given.
+    Reuses the same report-building logic as the scheduled daily job
+    (``send_user_report_now``), so results match what that user would get
+    at the scheduled report time — minus the inter-user stagger.
+    """
+    if context.args:
+        try:
+            target_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid user ID.")
+            return
+    else:
+        target_id = update.effective_user.id
+
+    try:
+        user = await db.get_user(target_id)
+        profile = await db.get_profile(target_id)
+    except Exception as exc:
+        logger.exception("Failed to load user/profile for user_id=%s", target_id)
+        await update.message.reply_html(
+            format_error(
+                update.effective_user.id,
+                "⚠️ Something went wrong while loading that user's data.",
+                exc,
+            )
+        )
+        return
+
+    if not user or user["status"] != "approved":
+        await update.message.reply_text("❌ That user is not approved.")
+        return
+    if not profile or not (
+        profile.get("national_id") or profile.get("driving_licence") or profile.get("vehicle_plate")
+    ):
+        await update.message.reply_text("❌ That user has no profile data saved.")
+        return
+
+    data = {
+        "user_id": target_id,
+        "first_name": user.get("first_name"),
+        "national_id": profile.get("national_id"),
+        "driving_licence": profile.get("driving_licence"),
+        "vehicle_plate": profile.get("vehicle_plate"),
+    }
+
+    await update.message.reply_text(
+        f"⏳ Running report for <code>{target_id}</code>…", parse_mode="HTML"
+    )
+    try:
+        sent = await send_user_report_now(context, data)
+    except Exception as exc:
+        logger.exception("Failed to run report for user_id=%s", target_id)
+        await update.message.reply_html(
+            format_error(
+                update.effective_user.id,
+                "⚠️ Something went wrong while running that report.",
+                exc,
+            )
+        )
+        return
+
+    if sent:
+        await update.message.reply_text(
+            f"✅ Report sent to <code>{target_id}</code>.", parse_mode="HTML"
+        )
+    else:
+        await update.message.reply_text(
+            f"ℹ️ Nothing to report for <code>{target_id}</code> right now.", parse_mode="HTML"
+        )
 
 
 @admin

@@ -25,7 +25,7 @@ def _make_context(args: list[str] | None = None) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_non_admin_is_silently_ignored():
+async def test_non_admin_is_rejected():
     update = _make_update(1)
     context = _make_context(["1"])
 
@@ -35,7 +35,7 @@ async def test_non_admin_is_silently_ignored():
     ):
         await debug_cmd(update, context)
 
-    update.message.reply_text.assert_not_awaited()
+    update.message.reply_text.assert_awaited_once_with("⛔ Not authorised.")
     mock_add.assert_not_called()
 
 

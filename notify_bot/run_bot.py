@@ -19,7 +19,14 @@ import urllib.request
 
 import telegram.error
 from telegram import BotCommand
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from notify_bot import config, db
 from notify_bot.handlers.admin import (
@@ -33,7 +40,7 @@ from notify_bot.handlers.admin import (
     undebug_cmd,
     users_cmd,
 )
-from notify_bot.handlers.common import help_command, request_access, start
+from notify_bot.handlers.common import help_command, request_access, start, unknown_command
 from notify_bot.handlers.enroll import build_enroll_handler, unenroll_command
 from notify_bot.handlers.eur import eur_command
 from notify_bot.handlers.obligations import (
@@ -228,6 +235,10 @@ def run_bot() -> None:
     # ── Inline button callbacks ───────────────────────────────────────────────
     # Pattern must be registered before a generic catch-all if one were added
     application.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^(approve|deny):"))
+
+    # ── Unknown command catch-all ─────────────────────────────────────────────
+    # Must be registered last so it only catches /commands no handler above matched.
+    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
 
     # ── Global error handler ──────────────────────────────────────────────────
     application.add_error_handler(_error_handler)

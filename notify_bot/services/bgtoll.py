@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import httpx
 
@@ -117,6 +118,55 @@ class VignetteInfo:
 
 
 # ── Parser ────────────────────────────────────────────────────────────────────
+
+
+def _format_validity_date(value: str) -> str:
+    """Drop a redundant midnight time and mark an end-of-day time as inclusive.
+
+    "07.06.2026 00:00:00" -> "07.06.2026"
+    "06.06.2027 23:59:59" -> "06.06.2027 (Including)"
+    Any other value (already date-only, or an unexpected time) passes through.
+    """
+    if value.endswith(" 00:00:00"):
+        return value[: -len(" 00:00:00")]
+    if value.endswith(" 23:59:59"):
+        return value[: -len(" 23:59:59")] + " (Including)"
+    return value
+
+
+def _parse_bg_datetime(value: str) -> datetime | None:
+    """Parse a ``dd.mm.yyyy`` or ``dd.mm.yyyy HH:MM:SS`` string; ``None`` if unrecognized."""
+    for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def format_validity_period(valid_from: str | None, valid_to: str | None) -> list[str]:
+    """Render a vignette/sticker/policy validity period as labeled message lines.
+
+    If ``valid_from`` is already in the past, the period is underway, so its
+    exact start time no longer matters — it's shown as a bare date on a
+    "Started" line, with "Ends" on its own line using the usual end-date
+    formatting. Otherwise (not started yet, or the date couldn't be parsed)
+    a single "Validity starting: from until to" line is returned instead.
+    """
+    if not valid_from:
+        return []
+
+    start_dt = _parse_bg_datetime(valid_from)
+    if start_dt is not None and start_dt <= datetime.now():
+        lines = [f"📅 Started: {valid_from.split(' ', 1)[0]}"]
+        if valid_to:
+            lines.append(f"📅 Ends: {_format_validity_date(valid_to)}")
+        return lines
+
+    line = f"📅 Validity starting: {_format_validity_date(valid_from)}"
+    if valid_to:
+        line += f" until {_format_validity_date(valid_to)}"
+    return [line]
 
 
 def _parse(plate: str, country: str, data: dict) -> VignetteInfo:

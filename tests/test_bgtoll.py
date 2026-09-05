@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -11,9 +12,76 @@ from notify_bot.services.bgtoll import (
     BgtollError,
     CloudflareBlockedError,
     VignetteInfo,
+    _format_validity_date,
     _parse,
+    _parse_bg_datetime,
     check_vignette,
+    format_validity_period,
 )
+
+# ── _format_validity_date (pure function) ────────────────────────────────────
+
+
+def test_format_validity_date_strips_midnight():
+    assert _format_validity_date("07.06.2026 00:00:00") == "07.06.2026"
+
+
+def test_format_validity_date_marks_end_of_day_inclusive():
+    assert _format_validity_date("06.06.2027 23:59:59") == "06.06.2027 (Including)"
+
+
+def test_format_validity_date_passes_through_other_values():
+    assert _format_validity_date("2025-01-01") == "2025-01-01"
+    assert _format_validity_date("07.06.2026 12:30:00") == "07.06.2026 12:30:00"
+
+
+# ── _parse_bg_datetime (pure function) ───────────────────────────────────────
+
+
+def test_parse_bg_datetime_with_time():
+    assert _parse_bg_datetime("07.06.2026 00:00:00") == datetime(2026, 6, 7, 0, 0, 0)
+
+
+def test_parse_bg_datetime_date_only():
+    assert _parse_bg_datetime("07.06.2026") == datetime(2026, 6, 7)
+
+
+def test_parse_bg_datetime_unrecognized_format():
+    assert _parse_bg_datetime("not-a-date") is None
+
+
+# ── format_validity_period (pure function) ───────────────────────────────────
+
+
+def test_format_validity_period_not_started_yet():
+    # Start date far in the future relative to any real "now".
+    lines = format_validity_period("01.01.2099 00:00:00", "31.12.2099 23:59:59")
+    assert lines == ["📅 Validity starting: 01.01.2099 until 31.12.2099 (Including)"]
+
+
+def test_format_validity_period_already_started():
+    lines = format_validity_period("01.01.2000 00:00:00", "31.12.2099 23:59:59")
+    assert lines == ["📅 Started: 01.01.2000", "📅 Ends: 31.12.2099 (Including)"]
+
+
+def test_format_validity_period_already_started_date_only():
+    # boleron-style dates carry no time component.
+    lines = format_validity_period("01.01.2000", "31.12.2099")
+    assert lines == ["📅 Started: 01.01.2000", "📅 Ends: 31.12.2099"]
+
+
+def test_format_validity_period_already_started_no_end_date():
+    assert format_validity_period("01.01.2000 00:00:00", None) == ["📅 Started: 01.01.2000"]
+
+
+def test_format_validity_period_no_start_date_returns_empty():
+    assert format_validity_period(None, "31.12.2099") == []
+
+
+def test_format_validity_period_unparseable_start_falls_back_to_valid_line():
+    lines = format_validity_period("not-a-date", "31.12.2099")
+    assert lines == ["📅 Validity starting: not-a-date until 31.12.2099"]
+
 
 # ── _parse (pure function) ────────────────────────────────────────────────────
 
@@ -40,6 +108,21 @@ def test_parse_nested_vignette_key():
     assert result.emission_class == "Euro 5"
     assert result.vehicle_type == "Car"
     assert result.vignette_series == "B12345"
+
+
+def test_parse_keeps_raw_validity_dates_with_time():
+    """_parse stores the raw date+time strings; formatting happens at render time."""
+    data = {
+        "vignette": {
+            "validityDateFromFormated": "07.06.2026 00:00:00",
+            "validityDateToFormated": "06.06.2027 23:59:59",
+            "status": "VALID",
+        }
+    }
+    result = _parse("XH2856", "BG", data)
+
+    assert result.validity_date_from == "07.06.2026 00:00:00"
+    assert result.validity_date_to == "06.06.2027 23:59:59"
 
 
 def test_parse_flat_response():

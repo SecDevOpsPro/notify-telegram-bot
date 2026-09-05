@@ -30,7 +30,12 @@ from notify_bot.services.boleron import (
     check_vehicle_data,
     check_vignette_boleron,
 )
-from notify_bot.services.bgtoll import BgtollError, CloudflareBlockedError, check_vignette
+from notify_bot.services.bgtoll import (
+    BgtollError,
+    CloudflareBlockedError,
+    check_vignette,
+    format_validity_period,
+)
 from notify_bot.services.mvr import MVRApiError, check_by_licence, check_by_plate, render_obligations
 from notify_bot.services.sofiatraffic import (
     CloudflareError as SofiaCloudflareError,
@@ -121,8 +126,7 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         status_icon = "✅" if bv.active else "❌"
         status_label = "Active" if bv.active else "Inactive"
         lines = [f"🛣️ <b>Vignette for {plate}</b>", f"{status_icon} Status: {status_label}"]
-        if bv.valid_from:
-            lines.append(f"📅 Valid: {bv.valid_from} → {bv.valid_to}")
+        lines.extend(format_validity_period(bv.valid_from, bv.valid_to))
         if bv.validity_type:
             lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
         if bv.price:
@@ -139,8 +143,7 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     status_icon = "✅" if info.is_valid else "❌"
     status_label = "Active" if info.is_valid else "Inactive"
     lines = [f"🛣️ <b>Vignette for {plate}</b>", f"{status_icon} Status: {status_label}"]
-    if info.validity_date_from:
-        lines.append(f"📅 Valid: {info.validity_date_from} → {info.validity_date_to}")
+    lines.extend(format_validity_period(info.validity_date_from, info.validity_date_to))
     if info.vignette_type:
         lines.append(f"📋 Type: {info.vignette_type}")
     if info.emission_class:
@@ -343,7 +346,7 @@ async def gtp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await update.message.reply_html(
         f"🔧 <b>Technical Inspection for {plate}</b>\n"
-        f"✅ Valid to: <b>{info.valid_to}</b>"
+        f"✅ Valid until: <b>{info.valid_to}</b>"
     )
 
 
@@ -391,7 +394,7 @@ async def mtpl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if info.insurer:
         lines.append(f"🏢 Insurer: {info.insurer}")
     if info.valid_from and info.valid_to:
-        lines.append(f"📅 Valid: {info.valid_from} → {info.valid_to}")
+        lines.append(f"📅 Valid from: {info.valid_from} to {info.valid_to}")
 
     await update.message.reply_html("\n".join(lines))
 

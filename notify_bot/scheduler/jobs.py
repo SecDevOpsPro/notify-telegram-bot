@@ -22,7 +22,12 @@ from typing import Any, Callable, Coroutine, Type
 from telegram.ext import ContextTypes
 
 from notify_bot import db
-from notify_bot.services.bgtoll import BgtollError, CloudflareBlockedError, check_vignette
+from notify_bot.services.bgtoll import (
+    BgtollError,
+    CloudflareBlockedError,
+    check_vignette,
+    format_validity_period,
+)
 from notify_bot.services.boleron import (
     BoleronError,
     BoleronVignetteInfo,
@@ -176,10 +181,9 @@ async def _build_report_message(user: dict) -> str | None:
                     f"🛣️ <b>Vignette ({plate}):</b>",
                     f"{status_icon} Status: {status_label}",
                 ]
-                if vignette.validity_date_from:
-                    vignette_lines.append(
-                        f"📅 Valid: {vignette.validity_date_from} → {vignette.validity_date_to}"
-                    )
+                vignette_lines.extend(
+                    format_validity_period(vignette.validity_date_from, vignette.validity_date_to)
+                )
                 if vignette.vignette_type:
                     vignette_lines.append(f"📋 Type: {vignette.vignette_type}")
                 remaining = _days_until(vignette.validity_date_to)
@@ -203,8 +207,7 @@ async def _build_report_message(user: dict) -> str | None:
                         f"🛣️ <b>Vignette ({plate}):</b>",
                         f"{status_icon} Status: {status_label}",
                     ]
-                    if bv.valid_from:
-                        bv_lines.append(f"📅 Valid: {bv.valid_from} → {bv.valid_to}")
+                    bv_lines.extend(format_validity_period(bv.valid_from, bv.valid_to))
                     if bv.validity_type:
                         bv_lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
                     if bv.price:
@@ -237,10 +240,7 @@ async def _build_report_message(user: dict) -> str | None:
                 if sticker.zone:
                     sticker_lines.append(f"📍 Zone: {sticker.zone}")
                 sections.append("\n".join(sticker_lines))
-            else:
-                sections.append(
-                    f"🅿️ <b>Parking sticker ({plate}):</b>\n❌ No active parking sticker found."
-                )
+            # If not found: omit from daily report (no news is good news)
             if clamp.found and clamp.clamped:
                 clamp_lines = [
                     f"🔒 <b>Wheel clamp ({plate}):</b>",
@@ -264,7 +264,7 @@ async def _build_report_message(user: dict) -> str | None:
             if gtp.found:
                 gtp_lines = [
                     f"🔧 <b>Technical Inspection ({plate}):</b>",
-                    f"✅ Valid to: {gtp.valid_to}",
+                    f"✅ Valid until: {gtp.valid_to}",
                 ]
                 remaining = _days_until(gtp.valid_to)
                 if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
@@ -290,7 +290,7 @@ async def _build_report_message(user: dict) -> str | None:
             if mtpl.insurer:
                 mtpl_lines.append(f"🏢 {mtpl.insurer}")
             if mtpl.valid_to:
-                mtpl_lines.append(f"📅 Valid to: {mtpl.valid_to}")
+                mtpl_lines.append(f"📅 Valid until: {mtpl.valid_to}")
             remaining = _days_until(mtpl.valid_to)
             if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
                 mtpl_lines.append(f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!")

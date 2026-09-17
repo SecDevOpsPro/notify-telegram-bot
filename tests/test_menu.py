@@ -123,7 +123,7 @@ def test_keyboard_not_approved_only_shows_request_and_change():
     markup = menu.build_help_keyboard(phase)
 
     data = _callback_data(markup)
-    assert data == ["cmd:request", "cmd:change"]
+    assert data == ["cmd:request", "cmd:change", "cmd:list_commands"]
 
 
 def test_keyboard_approved_not_enrolled_shows_enroll_and_change():

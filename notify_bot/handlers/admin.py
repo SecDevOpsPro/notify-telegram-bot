@@ -21,7 +21,7 @@ import logging
 from typing import Awaitable, Callable
 
 import httpx
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from notify_bot import config, db
@@ -32,8 +32,12 @@ logger = logging.getLogger(__name__)
 
 _APPROVED_MSG = (
     "✅ Your access has been approved!\n"
-    "Use /enroll to save your personal data (ID, licence, plate), "
-    "then /help to see all available commands."
+    "Use /enroll (or tap the button below) to save your personal data "
+    "(ID, licence, plate), then /help to see all available commands."
+)
+
+_ENROLL_KEYBOARD = InlineKeyboardMarkup(
+    [[InlineKeyboardButton("📝 Enroll your data", callback_data="cmd:enroll")]]
 )
 
 _NOT_AUTHORISED_MSG = "⛔ Not authorised."
@@ -59,10 +63,15 @@ def admin(handler: _Handler) -> _Handler:
     return wrapper
 
 
-async def _notify_user(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str) -> None:
+async def _notify_user(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
     """Best-effort DM to a user; logs and ignores any error."""
     try:
-        await context.bot.send_message(chat_id=user_id, text=text)
+        await context.bot.send_message(chat_id=user_id, text=text, reply_markup=reply_markup)
     except Exception:
         logger.warning("Could not DM user %s", user_id)
 
@@ -99,7 +108,7 @@ async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(
         f"✅ User <code>{target_id}</code> approved.", parse_mode="HTML"
     )
-    await _notify_user(context, target_id, _APPROVED_MSG)
+    await _notify_user(context, target_id, _APPROVED_MSG, reply_markup=_ENROLL_KEYBOARD)
 
 
 @admin
@@ -329,7 +338,7 @@ async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text(
             f"✅ Approved user <code>{target_id}</code>.", parse_mode="HTML"
         )
-        await _notify_user(context, target_id, _APPROVED_MSG)
+        await _notify_user(context, target_id, _APPROVED_MSG, reply_markup=_ENROLL_KEYBOARD)
     elif action == "deny":
         await query.edit_message_text(
             f"❌ Denied user <code>{target_id}</code>.", parse_mode="HTML"

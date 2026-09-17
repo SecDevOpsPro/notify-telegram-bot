@@ -9,6 +9,9 @@ lerna-debug.log*
 
 .env
 
+# Local dev SQLite DB + error log (see README "Local development")
+/data
+
 ch_data
 ch_logs
 n8n_data

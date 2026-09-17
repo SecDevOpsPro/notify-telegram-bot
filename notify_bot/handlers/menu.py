@@ -38,7 +38,7 @@ def _dispatch_table() -> dict[str, _Handler]:
     # common.py imports this module to build the /help keyboard, and some of
     # these handler modules import from common.py.
     from notify_bot.handlers.admin import brief_cmd, myip_cmd, pending_cmd, users_cmd
-    from notify_bot.handlers.common import request_access
+    from notify_bot.handlers.common import list_commands_command, request_access
     from notify_bot.handlers.enroll import unenroll_command
     from notify_bot.handlers.eur import eur_command
     from notify_bot.handlers.obligations import (
@@ -54,6 +54,7 @@ def _dispatch_table() -> dict[str, _Handler]:
     )
 
     return {
+        "list_commands": list_commands_command,
         "request": request_access,
         "change": eur_command,
         "unenroll": unenroll_command,
@@ -112,6 +113,13 @@ def _row(*pairs: tuple[str, str]) -> list[InlineKeyboardButton]:
     return [InlineKeyboardButton(label, callback_data=f"cmd:{cmd}") for label, cmd in pairs]
 
 
+def all_commands_row() -> list[InlineKeyboardButton]:
+    """The "📜 All commands" button — shared by /help's own keyboard and by
+    /start, so every entry point offers a way to reach the full static
+    command reference (see handlers/common.py's list_commands_command)."""
+    return [InlineKeyboardButton("📜 All commands", callback_data="cmd:list_commands")]
+
+
 def build_help_keyboard(phase: dict) -> InlineKeyboardMarkup:
     """Build the phase-appropriate inline keyboard shown under /help.
 
@@ -141,6 +149,8 @@ def build_help_keyboard(phase: dict) -> InlineKeyboardMarkup:
         rows.append(_header("🛠 Admin"))
         rows.append(_row(("✅ Pending", "pending"), ("👥 Users", "users")))
         rows.append(_row(("🌐 My IP", "myip"), ("📋 Brief", "brief")))
+
+    rows.append(all_commands_row())
 
     return InlineKeyboardMarkup(rows)
 

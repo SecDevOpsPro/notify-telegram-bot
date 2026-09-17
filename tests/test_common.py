@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from notify_bot.handlers.common import help_command, request_access, start
+from notify_bot.handlers.common import help_command, list_commands_command, request_access, start
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -229,8 +229,12 @@ async def test_start_approved_without_profile_suggests_enroll():
     ):
         await start(update, context)
 
-    msg = update.message.reply_text.call_args[0][0]
+    call = update.message.reply_text.call_args
+    msg = call[0][0]
     assert "/enroll" in msg
+    keyboard = call.kwargs["reply_markup"]
+    buttons = [button for row in keyboard.inline_keyboard for button in row]
+    assert any(b.callback_data == "cmd:enroll" for b in buttons)
 
 
 @pytest.mark.asyncio
@@ -254,9 +258,44 @@ async def test_start_approved_with_profile_skips_enroll_prompt():
     ):
         await start(update, context)
 
-    msg = update.message.reply_text.call_args[0][0]
+    call = update.message.reply_text.call_args
+    msg = call[0][0]
     assert "/enroll" not in msg
     assert "/help" in msg
+    keyboard = call.kwargs["reply_markup"]
+    buttons = [b.callback_data for row in keyboard.inline_keyboard for b in row]
+    assert "cmd:driver" in buttons
+    assert "cmd:enroll" not in buttons
+    assert "cmd:pending" not in buttons
+
+
+@pytest.mark.asyncio
+async def test_start_approved_with_profile_and_admin_also_gets_admin_buttons():
+    update = _make_update(999)
+    context = _make_context()
+    profile = {
+        "national_id": "1234567890",
+        "driving_licence": None,
+        "vehicle_plate": None,
+        "talon_no": None,
+    }
+
+    with (
+        patch("notify_bot.handlers.common.db.upsert_user", new=AsyncMock()),
+        patch(
+            "notify_bot.handlers.common.db.get_user",
+            new=AsyncMock(return_value={"status": "approved"}),
+        ),
+        patch("notify_bot.handlers.common.db.get_profile", new=AsyncMock(return_value=profile)),
+        patch("notify_bot.handlers.common.config.ADMIN_TELEGRAM_ID", 999),
+    ):
+        await start(update, context)
+
+    call = update.message.reply_text.call_args
+    keyboard = call.kwargs["reply_markup"]
+    buttons = [b.callback_data for row in keyboard.inline_keyboard for b in row]
+    assert "cmd:driver" in buttons
+    assert "cmd:pending" in buttons
 
 
 @pytest.mark.asyncio
@@ -320,6 +359,52 @@ async def test_help_no_effective_user_is_silently_ignored():
 
     mock_phase.assert_not_awaited()
     update.effective_message.reply_html.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_help_list_commands_arg_bypasses_phase_menu():
+    """/help list-commands must show the full static reference instead of
+    the phase-appropriate button menu."""
+    update = _make_update(20)
+    context = _make_context()
+    context.args = ["list-commands"]
+
+    with patch(
+        "notify_bot.handlers.common.menu.get_user_phase", new=AsyncMock()
+    ) as mock_phase:
+        await help_command(update, context)
+
+    mock_phase.assert_not_awaited()
+    update.effective_message.reply_html.assert_awaited_once()
+    text = update.effective_message.reply_html.call_args[0][0]
+    assert "All Commands" in text
+    assert "/driver" in text
+
+
+@pytest.mark.asyncio
+async def test_list_commands_command_hides_admin_section_for_non_admin():
+    update = _make_update(20)
+    context = _make_context()
+
+    with patch("notify_bot.handlers.common.config.is_admin", return_value=False):
+        await list_commands_command(update, context)
+
+    text = update.effective_message.reply_html.call_args[0][0]
+    assert "/driver" in text
+    assert "Admin only" not in text
+
+
+@pytest.mark.asyncio
+async def test_list_commands_command_shows_admin_section_for_admin():
+    update = _make_update(999)
+    context = _make_context()
+
+    with patch("notify_bot.handlers.common.config.is_admin", return_value=True):
+        await list_commands_command(update, context)
+
+    text = update.effective_message.reply_html.call_args[0][0]
+    assert "Admin only" in text
+    assert "/approve" in text
 
 
 @pytest.mark.asyncio

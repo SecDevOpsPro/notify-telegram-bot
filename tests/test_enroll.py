@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram.ext import ConversationHandler
 
-from notify_bot.handlers.enroll import _save_and_confirm
+from notify_bot.handlers.enroll import ASK_NATIONAL_ID, _save_and_confirm, enroll_start
 
 
 def _make_update(user_id: int = 1) -> MagicMock:
@@ -93,3 +93,60 @@ async def test_save_and_confirm_does_not_crash_when_refetch_returns_none():
     assert state == ConversationHandler.END
     update.message.reply_text.assert_awaited_once()
     assert "couldn't confirm" in update.message.reply_text.call_args[0][0]
+
+
+# ── enroll_start (command vs. menu-button entry points) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_enroll_start_via_command_does_not_touch_callback_query():
+    """/enroll typed as a command: no callback_query to answer."""
+    update = _make_update()
+    update.callback_query = None
+    context = _make_context()
+
+    with patch(
+        "notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=None)
+    ):
+        state = await enroll_start(update, context)
+
+    assert state == ASK_NATIONAL_ID
+    update.message.reply_html.assert_awaited_once()
+    assert "Step 1 of 4" in update.message.reply_html.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_enroll_start_via_menu_button_answers_callback_and_replies():
+    """The '📝 Enroll your data' button: a callback_query with no top-level
+    .message — enroll_start must answer it and reply via .effective_message
+    rather than crash on a None .message."""
+    update = _make_update()
+    update.callback_query = MagicMock()
+    update.callback_query.answer = AsyncMock()
+    context = _make_context()
+
+    with patch(
+        "notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=None)
+    ):
+        state = await enroll_start(update, context)
+
+    assert state == ASK_NATIONAL_ID
+    update.callback_query.answer.assert_awaited_once()
+    update.effective_message.reply_html.assert_awaited_once()
+    assert "Step 1 of 4" in update.effective_message.reply_html.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_enroll_start_shows_current_national_id_when_profile_exists():
+    update = _make_update()
+    update.callback_query = None
+    context = _make_context()
+    profile = {"national_id": "1234567890"}
+
+    with patch(
+        "notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=profile)
+    ):
+        await enroll_start(update, context)
+
+    text = update.message.reply_html.call_args[0][0]
+    assert "1234567890" in text

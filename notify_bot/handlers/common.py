@@ -10,39 +10,23 @@ from telegram.ext import ContextTypes
 
 from notify_bot import config, db
 from notify_bot.errors import format_error
+from notify_bot.handlers import menu
 
 logger = logging.getLogger(__name__)
 
-_HELP_HEADER_ADMIN = "<b>📖 Help</b> — Display the full command reference."
-_HELP_HEADER_USER = "<b>📖 Help</b> — Display the command reference."
+_HELP_HEADER = "<b>📖 Help</b>"
 
-_HELP_PUBLIC = """
-<b>Public commands</b> (no approval needed):
-/start   — Welcome message
-/help    — Show this message
-/request — Ask the admin for access
-/change  — EUR exchange rates (Cuba)
+_HELP_SUBTITLE_NOT_APPROVED = "This is a private bot — tap below to request access."
+_HELP_SUBTITLE_NOT_ENROLLED = "✅ You're approved — enroll your data to unlock vehicle checks."
+_HELP_SUBTITLE_ENROLLED = "Tap a button below to run a check."
 
-<b>After approval:</b>
-/enroll   — Save your personal data (ID, licence, plate)
-/unenroll — Delete your saved profile data
-/driver   — Check driving licence obligations (MVR)
-/plate    — Check vehicle obligations (MVR)
-/vignette — Check road e-vignette (bgtoll.bg) — also: /vignette &lt;plate&gt;
-/sticker  — Check Sofia parking sticker (sofiatraffic.bg) — also: /sticker &lt;plate&gt;
-/clamp    — Check wheel-clamp status (sofiatraffic.bg) — also: /clamp &lt;plate&gt;
-/gtp      — Check technical inspection validity — also: /gtp &lt;plate&gt;
-/mtpl     — Check civil liability insurance — also: /mtpl &lt;plate&gt;
-/fines    — Check traffic fines (KAT)
-/vehicle  — Show vehicle registration data (plate + talon required)
-"""
-
-_HELP_ADMIN = """
-<b>Admin only:</b>
-/approve &lt;id&gt;, /deny &lt;id&gt;, /pending, /users, /myip
-/debug &lt;id&gt;, /undebug &lt;id&gt;
-/brief [id]
-"""
+# Admin is a role, independent of the admin's own approval/enrollment status
+# above — shown whenever the caller is an admin, in every status variant.
+_HELP_ADMIN_NOTE = (
+    "\n\n🛠 <b>Admin tools</b> are available below, regardless of your own status.\n"
+    "<i>Commands that take an ID argument stay text-only: "
+    "/approve &lt;id&gt;, /deny &lt;id&gt;, /debug &lt;id&gt;, /undebug &lt;id&gt;.</i>"
+)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -117,14 +101,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Display the full command reference for admins, or the command reference for non-admins."""
+    """Show the phase-appropriate command menu as tappable buttons."""
     user = update.effective_user
-    is_admin = bool(user and config.is_admin(user.id))
-    header = _HELP_HEADER_ADMIN if is_admin else _HELP_HEADER_USER
-    text = header + _HELP_PUBLIC
-    if is_admin:
-        text += _HELP_ADMIN
-    await update.message.reply_html(text)
+    if not user:
+        return
+
+    phase = await menu.get_user_phase(user.id)
+
+    if not phase["is_approved"]:
+        subtitle = _HELP_SUBTITLE_NOT_APPROVED
+    elif not phase["has_profile"]:
+        subtitle = _HELP_SUBTITLE_NOT_ENROLLED
+    else:
+        subtitle = _HELP_SUBTITLE_ENROLLED
+
+    text = f"{_HELP_HEADER}\n\n{subtitle}"
+    if phase["is_admin"]:
+        text += _HELP_ADMIN_NOTE
+
+    await update.effective_message.reply_html(text, reply_markup=menu.build_help_keyboard(phase))
 
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

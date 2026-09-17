@@ -17,6 +17,7 @@ import re
 
 from telegram import Update
 from telegram.ext import (
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
@@ -49,11 +50,20 @@ _TALON_RE = re.compile(r"^\d{6,12}$")
 
 
 async def enroll_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the enrollment wizard — ask for National ID."""
+    """Start the enrollment wizard — ask for National ID.
+
+    Reused as both the /enroll command entry point and the "📝 Enroll your
+    data" menu button's entry point — a button tap carries a callback_query
+    with no top-level `.message`, so this replies via `.effective_message`
+    (which resolves correctly for both) rather than `.message`.
+    """
+    if update.callback_query:
+        await update.callback_query.answer()
+
     profile = await db.get_profile(update.effective_user.id)
     current = profile.get("national_id") or "—" if profile else "—"
 
-    await update.message.reply_html(
+    await update.effective_message.reply_html(
         "📋 <b>Enrollment Wizard</b> — Step 1 of 4\n\n"
         f"Current National ID: <code>{current}</code>\n\n"
         "Please enter your <b>National ID (EGN)</b> — 10 digits.\n"
@@ -286,7 +296,10 @@ def build_enroll_handler() -> ConversationHandler:
     Must be registered *before* any plain CommandHandlers.
     """
     return ConversationHandler(
-        entry_points=[CommandHandler("enroll", require_approved(enroll_start))],
+        entry_points=[
+            CommandHandler("enroll", require_approved(enroll_start)),
+            CallbackQueryHandler(require_approved(enroll_start), pattern=r"^cmd:enroll$"),
+        ],
         states={
             ASK_NATIONAL_ID: [
                 CommandHandler("skip", skip_national_id),

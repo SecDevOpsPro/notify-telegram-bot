@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from notify_bot.handlers.common import request_access, start
+from notify_bot.handlers.common import help_command, request_access, start
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -302,3 +302,133 @@ async def test_start_denied_user_message_unchanged():
 
     msg = update.message.reply_text.call_args[0][0]
     assert "denied" in msg
+
+
+# ── /help ─────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_help_no_effective_user_is_silently_ignored():
+    update = _make_update(20)
+    update.effective_user = None
+    context = _make_context()
+
+    with patch(
+        "notify_bot.handlers.common.menu.get_user_phase", new=AsyncMock()
+    ) as mock_phase:
+        await help_command(update, context)
+
+    mock_phase.assert_not_awaited()
+    update.effective_message.reply_html.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_help_not_approved_shows_request_subtitle_and_keyboard():
+    update = _make_update(21)
+    context = _make_context()
+    phase = {"is_approved": False, "has_profile": False, "is_admin": False}
+    sentinel_keyboard = object()
+
+    with (
+        patch(
+            "notify_bot.handlers.common.menu.get_user_phase",
+            new=AsyncMock(return_value=phase),
+        ),
+        patch(
+            "notify_bot.handlers.common.menu.build_help_keyboard",
+            return_value=sentinel_keyboard,
+        ) as mock_build,
+    ):
+        await help_command(update, context)
+
+    mock_build.assert_called_once_with(phase)
+    update.effective_message.reply_html.assert_awaited_once()
+    text, kwargs = (
+        update.effective_message.reply_html.call_args[0][0],
+        update.effective_message.reply_html.call_args.kwargs,
+    )
+    assert "tap below to request access" in text
+    assert kwargs["reply_markup"] is sentinel_keyboard
+
+
+@pytest.mark.asyncio
+async def test_help_approved_not_enrolled_shows_enroll_subtitle():
+    update = _make_update(22)
+    context = _make_context()
+    phase = {"is_approved": True, "has_profile": False, "is_admin": False}
+
+    with (
+        patch(
+            "notify_bot.handlers.common.menu.get_user_phase",
+            new=AsyncMock(return_value=phase),
+        ),
+        patch("notify_bot.handlers.common.menu.build_help_keyboard", return_value=object()),
+    ):
+        await help_command(update, context)
+
+    text = update.effective_message.reply_html.call_args[0][0]
+    assert "enroll your data" in text
+
+
+@pytest.mark.asyncio
+async def test_help_regular_enrolled_user_gets_no_admin_note():
+    update = _make_update(23)
+    context = _make_context()
+    phase = {"is_approved": True, "has_profile": True, "is_admin": False}
+
+    with (
+        patch(
+            "notify_bot.handlers.common.menu.get_user_phase",
+            new=AsyncMock(return_value=phase),
+        ),
+        patch("notify_bot.handlers.common.menu.build_help_keyboard", return_value=object()),
+    ):
+        await help_command(update, context)
+
+    text = update.effective_message.reply_html.call_args[0][0]
+    assert "Tap a button below to run a check." in text
+    assert "text-only" not in text
+
+
+@pytest.mark.asyncio
+async def test_help_admin_gets_status_subtitle_plus_admin_note():
+    update = _make_update(24)
+    context = _make_context()
+    phase = {"is_approved": True, "has_profile": True, "is_admin": True}
+
+    with (
+        patch(
+            "notify_bot.handlers.common.menu.get_user_phase",
+            new=AsyncMock(return_value=phase),
+        ),
+        patch("notify_bot.handlers.common.menu.build_help_keyboard", return_value=object()),
+    ):
+        await help_command(update, context)
+
+    text = update.effective_message.reply_html.call_args[0][0]
+    assert "Tap a button below to run a check." in text
+    assert "Admin tools" in text
+    assert "/approve" in text  # the ID-argument commands note
+
+
+@pytest.mark.asyncio
+async def test_help_admin_not_approved_still_gets_admin_note():
+    """Admin-ness is a role, independent of the admin's own DB approval
+    status — the admin note (and, separately, the admin keyboard block)
+    must still show even when the admin hasn't been /approve'd themselves."""
+    update = _make_update(25)
+    context = _make_context()
+    phase = {"is_approved": False, "has_profile": False, "is_admin": True}
+
+    with (
+        patch(
+            "notify_bot.handlers.common.menu.get_user_phase",
+            new=AsyncMock(return_value=phase),
+        ),
+        patch("notify_bot.handlers.common.menu.build_help_keyboard", return_value=object()),
+    ):
+        await help_command(update, context)
+
+    text = update.effective_message.reply_html.call_args[0][0]
+    assert "tap below to request access" in text
+    assert "Admin tools" in text

@@ -29,6 +29,7 @@ from telegram.ext import (
 )
 
 from notify_bot import config, db
+from notify_bot.handlers import menu
 from notify_bot.handlers.admin import (
     approval_callback,
     approve_cmd,
@@ -235,6 +236,10 @@ def run_bot() -> None:
     # ── Inline button callbacks ───────────────────────────────────────────────
     # Pattern must be registered before a generic catch-all if one were added
     application.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^(approve|deny):"))
+
+    # Menu buttons — registered after build_enroll_handler() above, so its own
+    # "cmd:enroll" entry point claims that callback before this generic one.
+    menu.register(application)
 
     # ── Unknown command catch-all ─────────────────────────────────────────────
     # Must be registered last so it only catches /commands no handler above matched.

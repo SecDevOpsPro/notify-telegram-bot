@@ -14,6 +14,7 @@ Endpoints used:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -33,50 +34,62 @@ _FIREBASE_SIGN_IN_URL = (
 _API_BASE = "https://api.boleron.bg/boleron/external"
 _CARUTILS_BASE = "https://api.boleron.bg/boleron/carutils"
 
-# ── Translation maps (Cyrillic → Latin) ──────────────────────────────────────
+# ── Translation maps (Bulgarian → English, offline) ──────────────────────────
+#
+# Lookups are dictionary-only: no network calls. Anything not covered here is
+# shown to the user unchanged, so a gap means Cyrillic in a message, never an error.
 
 _ENGINE_TYPES: dict[str, str] = {
     "бензинов": "Petrol",
+    "бензин": "Petrol",
     "дизелов": "Diesel",
+    "дизел": "Diesel",
     "електрически": "Electric",
+    "електро": "Electric",
     "хибрид": "Hybrid",
+    "хибриден": "Hybrid",
     "газов": "Gas/LPG",
     "lpg": "Gas/LPG",
     "cng": "CNG",
 }
 
-_COLORS: dict[str, str] = {
-    "бял": "White",
-    "бяло": "White",
-    "черен": "Black",
-    "черно": "Black",
-    "червен": "Red",
-    "червено": "Red",
-    "син": "Blue",
-    "синьо": "Blue",
-    "тъмносин": "Dark Blue",
-    "тъмносиньо": "Dark Blue",
-    "сребрист": "Silver",
-    "сребристо": "Silver",
-    "сив": "Gray",
-    "сиво": "Gray",
-    "зелен": "Green",
-    "зелено": "Green",
-    "жълт": "Yellow",
-    "жълто": "Yellow",
-    "кафяв": "Brown",
-    "кафяво": "Brown",
-    "оранжев": "Orange",
-    "оранжево": "Orange",
-    "виолетов": "Violet",
-    "виолетово": "Violet",
-    "бежов": "Beige",
-    "бежово": "Beige",
-    "тъмночервен": "Dark Red",
-    "тъмночервено": "Dark Red",
-    "злато": "Gold",
-    "златист": "Gold",
-}
+# Bulgarian color adjectives agree with the noun, and the API isn't consistent
+# about which form it returns, so each color lists (masculine, feminine, neuter, plural).
+_COLOR_FORMS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("White", ("бял", "бяла", "бяло", "бели")),
+    ("Black", ("черен", "черна", "черно", "черни")),
+    ("Red", ("червен", "червена", "червено", "червени")),
+    ("Blue", ("син", "синя", "синьо", "сини")),
+    ("Silver", ("сребрист", "сребриста", "сребристо", "сребристи")),
+    ("Gray", ("сив", "сива", "сиво", "сиви")),
+    ("Green", ("зелен", "зелена", "зелено", "зелени")),
+    ("Yellow", ("жълт", "жълта", "жълто", "жълти")),
+    ("Brown", ("кафяв", "кафява", "кафяво", "кафяви")),
+    ("Orange", ("оранжев", "оранжева", "оранжево", "оранжеви")),
+    ("Violet", ("виолетов", "виолетова", "виолетово", "виолетови")),
+    ("Purple", ("лилав", "лилава", "лилаво", "лилави")),
+    ("Pink", ("розов", "розова", "розово", "розови")),
+    ("Beige", ("бежов", "бежова", "бежово", "бежови", "беж")),
+    ("Gold", ("златист", "златиста", "златисто", "златисти", "златен", "златна", "злато")),
+    ("Turquoise", ("тюркоазен", "тюркоазена", "тюркоазено", "тюркоазени")),
+    ("Cream", ("кремав", "кремава", "кремаво", "кремави")),
+    ("Bronze", ("бронзов", "бронзова", "бронзово", "бронзови", "бронз")),
+    ("Burgundy", ("бордо",)),
+    ("Champagne", ("шампанско",)),
+    ("Graphite", ("графит", "графитен", "графитена", "графитено", "графитени")),
+    ("Cherry", ("вишнев", "вишнева", "вишнево", "вишневи")),
+    ("Pearl", ("перлен", "перлена", "перлено", "перлени", "перла")),
+    ("Khaki", ("каки",)),
+)
+
+_COLORS: dict[str, str] = {form: english for english, forms in _COLOR_FORMS for form in forms}
+
+# "тъмно зелен", "тъмнозелен", "светло-сива" → "Dark Green", "Light Gray".
+_SHADES: dict[str, str] = {"тъмно": "Dark", "светло": "Light"}
+_SHADE_RE = re.compile(r"^(тъмно|светло)[\s-]*(\S.*)$")
+
+# "сив металик", "тъмно син - металик" → "... Metallic".
+_METALLIC_RE = re.compile(r"^(.+?)[\s-]+металик$")
 
 
 def _translate(value: str | None, table: dict[str, str]) -> str | None:
@@ -84,6 +97,32 @@ def _translate(value: str | None, table: dict[str, str]) -> str | None:
     if not value:
         return None
     return table.get(value.strip().lower(), value)
+
+
+def _translate_color(value: str | None) -> str | None:
+    """Translate a Bulgarian color name, handling shade prefixes and "металик".
+
+    Returns the original string when the base color isn't in ``_COLORS``.
+    """
+    if not value:
+        return None
+    text = value.strip().lower()
+
+    metallic = _METALLIC_RE.match(text)
+    if metallic:
+        text = metallic.group(1)
+
+    shade = None
+    shaded = _SHADE_RE.match(text)
+    if shaded:
+        shade, text = _SHADES[shaded.group(1)], shaded.group(2)
+
+    base = _COLORS.get(text)
+    if base is None:
+        return value
+
+    words = [shade, base, "Metallic" if metallic else None]
+    return " ".join(w for w in words if w)
 
 
 _HEADERS = {
@@ -334,7 +373,7 @@ async def check_vehicle_data(car_no: str, talon_no: str) -> VehicleData:
         engine=_translate(data.get("engine"), _ENGINE_TYPES),
         engine_cc=data.get("engineDisplacement") or data.get("engineVolume"),
         power_kw=data.get("power"),
-        color=_translate(data.get("vehicleColorName"), _COLORS),
+        color=_translate_color(data.get("vehicleColorName")),
         vehicle_class=data.get("vehicleClass"),
         seats=data.get("seatsDetail"),
         leasing=bool(data.get("leasing")),

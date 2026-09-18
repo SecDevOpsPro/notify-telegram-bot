@@ -81,6 +81,8 @@ uv sync
 # Set required environment variables
 export TOKEN="your-telegram-bot-token"
 export ADMIN_TELEGRAM_ID="your-telegram-user-id"
+export DATABASE_PATH="./data/bot.db"
+export LOG_FILE_PATH="./data/errors.log"
 
 # Run the bot
 uv run python -m notify_bot.run_bot
@@ -98,6 +100,7 @@ uv run pytest tests/
 | `TOKEN` | ✅ | — | Telegram Bot API token (from @BotFather) |
 | `ADMIN_TELEGRAM_ID` | ✅ | `0` | Your Telegram user ID (integer) |
 | `DATABASE_PATH` | | `/app/data/bot.db` | SQLite database file path |
+| `LOG_FILE_PATH` | | `/app/data/errors.log` | Error log file path |
 | `DAILY_REPORT_TIME` | | `08:00` | Daily report time in `HH:MM` UTC |
 | `LOGLEVEL` | | `INFO` | Python logging level |
 

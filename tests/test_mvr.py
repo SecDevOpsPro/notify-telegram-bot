@@ -18,7 +18,6 @@ from notify_bot.services.mvr import (
     render_obligations,
 )
 
-
 # ── _parse (pure function) ────────────────────────────────────────────────────
 
 
@@ -84,11 +83,11 @@ async def test_check_by_licence_success():
     mock_resp.json.return_value = mock_data
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("notify_bot.services.mvr.httpx.AsyncClient") as MockClient:
-        MockClient.return_value.__aenter__ = AsyncMock(
+    with patch("notify_bot.services.mvr.httpx.AsyncClient") as mock_client:
+        mock_client.return_value.__aenter__ = AsyncMock(
             return_value=MagicMock(get=AsyncMock(return_value=mock_resp))
         )
-        MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
 
         result = await check_by_licence("1234567890", "123456")
 
@@ -98,11 +97,11 @@ async def test_check_by_licence_success():
 
 @pytest.mark.asyncio
 async def test_check_by_licence_http_error():
-    with patch("notify_bot.services.mvr.httpx.AsyncClient") as MockClient:
-        MockClient.return_value.__aenter__ = AsyncMock(
+    with patch("notify_bot.services.mvr.httpx.AsyncClient") as mock_client:
+        mock_client.return_value.__aenter__ = AsyncMock(
             return_value=MagicMock(get=AsyncMock(side_effect=httpx.HTTPError("connection failed")))
         )
-        MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with pytest.raises(MVRApiError, match="connection error"):
             await check_by_licence("1234567890", "123456")
@@ -123,11 +122,11 @@ async def test_check_by_plate_success():
     mock_resp.json.return_value = mock_data
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("notify_bot.services.mvr.httpx.AsyncClient") as MockClient:
-        MockClient.return_value.__aenter__ = AsyncMock(
+    with patch("notify_bot.services.mvr.httpx.AsyncClient") as mock_client:
+        mock_client.return_value.__aenter__ = AsyncMock(
             return_value=MagicMock(get=AsyncMock(return_value=mock_resp))
         )
-        MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
 
         result = await check_by_plate("1234567890", "CB1234AB")
 
@@ -219,8 +218,7 @@ def test_format_obligation_breach_without_road_traffic_act_suffix():
 
 def test_translate_breach_expands_common_abbreviations():
     assert (
-        _translate_breach("чл. 21, ал. 2, от ЗДвП")
-        == "Art. 21, para. 2, of the Road Traffic Act"
+        _translate_breach("чл. 21, ал. 2, от ЗДвП") == "Art. 21, para. 2, of the Road Traffic Act"
     )
 
 
@@ -243,7 +241,9 @@ def test_render_obligations_formats_payment_dict():
     rendered = render_obligations(units)
 
     assert "💰 Amount: 51.13 EUR" in rendered
-    assert "💸 With discount: 35.79 EUR" in rendered  # no "(if paid by ...)" — no expirationDate given
+    assert (
+        "💸 With discount: 35.79 EUR" in rendered
+    )  # no "(if paid by ...)" — no expirationDate given
     assert "{'amount'" not in rendered  # no raw dict repr leaking through
 
 
@@ -265,8 +265,8 @@ async def test_check_by_plate_http_status_error():
     response = MagicMock()
     response.status_code = 503
 
-    with patch("notify_bot.services.mvr.httpx.AsyncClient") as MockClient:
-        MockClient.return_value.__aenter__ = AsyncMock(
+    with patch("notify_bot.services.mvr.httpx.AsyncClient") as mock_client:
+        mock_client.return_value.__aenter__ = AsyncMock(
             return_value=MagicMock(
                 get=AsyncMock(
                     side_effect=httpx.HTTPStatusError(
@@ -277,7 +277,7 @@ async def test_check_by_plate_http_status_error():
                 )
             )
         )
-        MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with pytest.raises(MVRApiError, match="HTTP 503"):
             await check_by_plate("1234567890", "CB1234AB")

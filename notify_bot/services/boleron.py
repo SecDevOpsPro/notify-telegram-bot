@@ -85,6 +85,7 @@ def _translate(value: str | None, table: dict[str, str]) -> str | None:
         return None
     return table.get(value.strip().lower(), value)
 
+
 _HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en,es;q=0.9",
@@ -173,6 +174,7 @@ async def _get(path: str, params: dict, *, base: str = _API_BASE) -> dict:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _clean_date(value: str | None) -> str | None:
     """Return just the ``dd.mm.yyyy`` date portion, dropping any time and suffix.
 
@@ -248,10 +250,10 @@ class VehicleData:
     first_reg_date: str | None = None
     build_year: int | None = None
     vin: str | None = None
-    engine: str | None = None          # translated to Latin
+    engine: str | None = None  # translated to Latin
     engine_cc: int | None = None
     power_kw: int | None = None
-    color: str | None = None           # translated to Latin
+    color: str | None = None  # translated to Latin
     vehicle_class: str | None = None
     seats: int | None = None
     leasing: bool = False

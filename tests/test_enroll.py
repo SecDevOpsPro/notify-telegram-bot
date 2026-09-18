@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from telegram import CallbackQuery, Chat, Message, Update, User
+from telegram.error import BadRequest
 from telegram.ext import ConversationHandler
 
 from notify_bot.handlers.enroll import (
@@ -14,9 +17,12 @@ from notify_bot.handlers.enroll import (
     _save_and_confirm,
     back_to_licence,
     back_to_national_id,
+    build_enroll_handler,
+    build_stale_enroll_button_handler,
     cancel,
     enroll_start,
     skip_national_id,
+    stale_enroll_button,
 )
 
 
@@ -115,9 +121,7 @@ async def test_enroll_start_via_command_does_not_touch_callback_query():
     update.callback_query = None
     context = _make_context()
 
-    with patch(
-        "notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=None)
-    ):
+    with patch("notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=None)):
         state = await enroll_start(update, context)
 
     assert state == ASK_NATIONAL_ID
@@ -135,9 +139,7 @@ async def test_enroll_start_via_menu_button_answers_callback_and_replies():
     update.callback_query.answer = AsyncMock()
     context = _make_context()
 
-    with patch(
-        "notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=None)
-    ):
+    with patch("notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=None)):
         state = await enroll_start(update, context)
 
     assert state == ASK_NATIONAL_ID
@@ -153,9 +155,7 @@ async def test_enroll_start_shows_current_national_id_when_profile_exists():
     context = _make_context()
     profile = {"national_id": "1234567890"}
 
-    with patch(
-        "notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=profile)
-    ):
+    with patch("notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=profile)):
         await enroll_start(update, context)
 
     text = update.message.reply_html.call_args[0][0]
@@ -238,6 +238,60 @@ async def test_cancel_via_button_answers_callback_and_clears_state():
     assert context.user_data == {}
     update.effective_message.reply_text.assert_awaited_once()
     assert "cancelled" in update.effective_message.reply_text.call_args[0][0]
+
+
+# ── Stale buttons (tapped after the wizard has ended) ───────────────────────
+
+
+def _button_tap(data: str) -> Update:
+    user = User(id=1, first_name="T", is_bot=False)
+    chat = Chat(id=1, type="private")
+    message = Message(message_id=1, date=datetime.now(timezone.utc), chat=chat, from_user=user)
+    query = CallbackQuery(id="1", from_user=user, chat_instance="x", data=data, message=message)
+    return Update(update_id=1, callback_query=query)
+
+
+@pytest.mark.parametrize("data", ["enroll:cancel", "enroll:skip", "enroll:back"])
+def test_wizard_button_with_no_active_conversation_reaches_stale_handler(data):
+    """Regression test: after /cancel ended the wizard, tapping the old Cancel
+    button matched no handler, so it was never answered and hung on its spinner.
+    ConversationHandler ignores it once no conversation is active — the stale
+    handler registered after it must claim it instead."""
+    update = _button_tap(data)
+
+    assert build_enroll_handler().check_update(update) is None
+    assert build_stale_enroll_button_handler().check_update(update)
+
+
+def test_stale_handler_ignores_non_wizard_buttons():
+    assert not build_stale_enroll_button_handler().check_update(_button_tap("cmd:help"))
+
+
+@pytest.mark.asyncio
+async def test_stale_enroll_button_answers_and_clears_keyboard():
+    update = MagicMock()
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.edit_message_reply_markup = AsyncMock()
+
+    await stale_enroll_button(update, _make_context())
+
+    update.callback_query.answer.assert_awaited_once()
+    assert "/enroll" in update.callback_query.answer.call_args[0][0]
+    update.callback_query.edit_message_reply_markup.assert_awaited_once_with(reply_markup=None)
+
+
+@pytest.mark.asyncio
+async def test_stale_enroll_button_survives_uneditable_message():
+    """A message too old to edit (BadRequest) must not turn the tap into an error."""
+    update = MagicMock()
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.edit_message_reply_markup = AsyncMock(
+        side_effect=BadRequest("Message can't be edited")
+    )
+
+    await stale_enroll_button(update, _make_context())
+
+    update.callback_query.answer.assert_awaited_once()
 
 
 # ── Back navigation ───────────────────────────────────────────────────────────

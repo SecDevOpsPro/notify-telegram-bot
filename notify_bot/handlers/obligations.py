@@ -20,6 +20,12 @@ from telegram.ext import ContextTypes
 
 from notify_bot import db
 from notify_bot.middlewares import require_approved
+from notify_bot.services.bgtoll import (
+    BgtollError,
+    CloudflareBlockedError,
+    check_vignette,
+    format_validity_period,
+)
 from notify_bot.services.boleron import (
     BoleronError,
     BoleronNotFoundError,
@@ -30,15 +36,16 @@ from notify_bot.services.boleron import (
     check_vehicle_data,
     check_vignette_boleron,
 )
-from notify_bot.services.bgtoll import (
-    BgtollError,
-    CloudflareBlockedError,
-    check_vignette,
-    format_validity_period,
+from notify_bot.services.mvr import (
+    MVRApiError,
+    check_by_licence,
+    check_by_plate,
+    render_obligations,
 )
-from notify_bot.services.mvr import MVRApiError, check_by_licence, check_by_plate, render_obligations
 from notify_bot.services.sofiatraffic import (
     CloudflareError as SofiaCloudflareError,
+)
+from notify_bot.services.sofiatraffic import (
     SofiaTrafficError,
     check_clamp,
     check_sticker,
@@ -112,10 +119,12 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         try:
             bv = await check_vignette_boleron(plate)
         except BoleronError as boleron_exc:
-            logger.warning("Boleron vignette fallback also failed for user %s: %s", uid, boleron_exc)
+            logger.warning(
+                "Boleron vignette fallback also failed for user %s: %s", uid, boleron_exc
+            )
             await update.message.reply_html(
-                f"⚠️ <b>Vignette check unavailable.</b>\n\n"
-                f'Check manually: <a href="https://check.bgtoll.bg/">check.bgtoll.bg</a>'
+                "⚠️ <b>Vignette check unavailable.</b>\n\n"
+                'Check manually: <a href="https://check.bgtoll.bg/">check.bgtoll.bg</a>'
             )
             return
         if not bv.found:
@@ -345,8 +354,7 @@ async def gtp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     await update.message.reply_html(
-        f"🔧 <b>Technical Inspection for {plate}</b>\n"
-        f"✅ Valid until: <b>{info.valid_to}</b>"
+        f"🔧 <b>Technical Inspection for {plate}</b>\n✅ Valid until: <b>{info.valid_to}</b>"
     )
 
 
@@ -441,8 +449,11 @@ async def fines_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         desc = fine.description or fine.anpp_number or "Fine"
         lines.append(f"• {desc}: {fine.amount:.2f} {sym}")
 
-    lines.append('\n<a href="https://www.boleron.bg/en/fine-check-result/">Pay online at boleron.bg</a>')
+    lines.append(
+        '\n<a href="https://www.boleron.bg/en/fine-check-result/">Pay online at boleron.bg</a>'
+    )
     await update.message.reply_html("\n".join(lines))
+
 
 @require_approved
 async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -460,9 +471,7 @@ async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text("🔍 Looking up vehicle data…")
 
     try:
-        v: VehicleData = await check_vehicle_data(
-            profile["vehicle_plate"], profile["talon_no"]
-        )
+        v: VehicleData = await check_vehicle_data(profile["vehicle_plate"], profile["talon_no"])
     except BoleronNotFoundError:
         plate = profile["vehicle_plate"]
         talon = profile["talon_no"]

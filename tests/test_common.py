@@ -352,9 +352,7 @@ async def test_help_no_effective_user_is_silently_ignored():
     update.effective_user = None
     context = _make_context()
 
-    with patch(
-        "notify_bot.handlers.common.menu.get_user_phase", new=AsyncMock()
-    ) as mock_phase:
+    with patch("notify_bot.handlers.common.menu.get_user_phase", new=AsyncMock()) as mock_phase:
         await help_command(update, context)
 
     mock_phase.assert_not_awaited()
@@ -369,9 +367,7 @@ async def test_help_list_commands_arg_bypasses_phase_menu():
     context = _make_context()
     context.args = ["list-commands"]
 
-    with patch(
-        "notify_bot.handlers.common.menu.get_user_phase", new=AsyncMock()
-    ) as mock_phase:
+    with patch("notify_bot.handlers.common.menu.get_user_phase", new=AsyncMock()) as mock_phase:
         await help_command(update, context)
 
     mock_phase.assert_not_awaited()

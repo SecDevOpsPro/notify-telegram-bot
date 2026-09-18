@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -14,7 +13,6 @@ from notify_bot.services.bgtoll import (
     VignetteInfo,
     _format_validity_date,
     _parse,
-    _parse_bg_datetime,
     check_vignette,
     format_validity_period,
 )
@@ -30,24 +28,15 @@ def test_format_validity_date_marks_end_of_day_inclusive():
     assert _format_validity_date("06.06.2027 23:59:59") == "06.06.2027 (Including)"
 
 
+def test_format_validity_date_normalizes_iso_dates():
+    assert _format_validity_date("2025-01-01") == "01.01.2025"
+    assert _format_validity_date("2025-12-17T00:00:00.000") == "17.12.2025"
+    assert _format_validity_date("2026-12-16T23:59:59.000") == "16.12.2026 (Including)"
+
+
 def test_format_validity_date_passes_through_other_values():
-    assert _format_validity_date("2025-01-01") == "2025-01-01"
     assert _format_validity_date("07.06.2026 12:30:00") == "07.06.2026 12:30:00"
-
-
-# ── _parse_bg_datetime (pure function) ───────────────────────────────────────
-
-
-def test_parse_bg_datetime_with_time():
-    assert _parse_bg_datetime("07.06.2026 00:00:00") == datetime(2026, 6, 7, 0, 0, 0)
-
-
-def test_parse_bg_datetime_date_only():
-    assert _parse_bg_datetime("07.06.2026") == datetime(2026, 6, 7)
-
-
-def test_parse_bg_datetime_unrecognized_format():
-    assert _parse_bg_datetime("not-a-date") is None
+    assert _format_validity_date("not-a-date") == "not-a-date"
 
 
 # ── format_validity_period (pure function) ───────────────────────────────────

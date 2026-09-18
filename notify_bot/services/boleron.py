@@ -14,13 +14,13 @@ Endpoints used:
 from __future__ import annotations
 
 import logging
-import re
 import time
 from dataclasses import dataclass, field
 
 import httpx
 
 from notify_bot import config
+from notify_bot.dates import format_date, parse_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -173,24 +173,22 @@ async def _get(path: str, params: dict, *, base: str = _API_BASE) -> dict:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-_TIME_SUFFIX_RE = re.compile(r"\s+\d{1,2}:\d{2}:\d{2}[^\d]*$")
-_NON_DIGIT_TAIL_RE = re.compile(r"[^\d]+$")
-
-
 def _clean_date(value: str | None) -> str | None:
-    """Return just the date portion, stripping Bulgarian suffixes and time.
+    """Return just the ``dd.mm.yyyy`` date portion, dropping any time and suffix.
 
     Handles:
       "15.12.2025г."         → "15.12.2025"
       "14.12.2026г. 23:59:59" → "14.12.2026"
       "15.04.2025 00:00:00"  → "15.04.2025"
+      "2025-12-17T00:00:00.000" → "17.12.2025"
+    A value that isn't a recognizable date is returned as-is (stripped).
     """
     if not value:
         return None
-    cleaned = value.strip()
-    cleaned = _TIME_SUFFIX_RE.sub("", cleaned).strip()   # drop HH:MM:SS
-    cleaned = _NON_DIGIT_TAIL_RE.sub("", cleaned).strip()  # drop г., ч., …
-    return cleaned or None
+    parsed = parse_datetime(value)
+    if parsed is not None:
+        return format_date(parsed)
+    return value.strip() or None
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -308,8 +306,8 @@ async def check_vignette_boleron(car_no: str) -> BoleronVignetteInfo:
         found=True,
         active=active,
         vignette_id=data.get("vignetteId"),
-        valid_from=data.get("validityStartFormatted", "").split(" ")[0] or None,
-        valid_to=data.get("validityEndFormatted", "").split(" ")[0] or None,
+        valid_from=_clean_date(data.get("validityStartFormatted")),
+        valid_to=_clean_date(data.get("validityEndFormatted")),
         price=data.get("vignettePrice"),
         validity_type=data.get("validityType"),
     )

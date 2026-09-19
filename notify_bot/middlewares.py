@@ -39,6 +39,12 @@ def require_approved(handler: Callable) -> Callable:
 
         record = await db.get_user(user.id)
         if not record or record["status"] != "approved":
+            # A button tap on a stale keyboard (e.g. "📝 Enroll your data" sent on
+            # approval, tapped after access was revoked) would otherwise be left
+            # unanswered, hanging on its loading spinner. getattr: menu buttons pass
+            # a _ButtonUpdate stand-in that has no callback_query (already answered).
+            if query := getattr(update, "callback_query", None):
+                await query.answer()
             await update.effective_message.reply_text(
                 "⛔ You don't have access to this command.\n"
                 "Use /request to ask the admin for access."

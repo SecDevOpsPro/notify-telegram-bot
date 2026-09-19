@@ -24,7 +24,7 @@ from notify_bot.services.boleron import (
     MtplInfo,
 )
 from notify_bot.services.mvr import MVRApiError, Obligation
-from notify_bot.services.sofiatraffic import ClampInfo, StickerInfo, SofiaTrafficError
+from notify_bot.services.sofiatraffic import ClampInfo, SofiaTrafficError, StickerInfo
 
 PLATE = "XH2856"
 
@@ -126,7 +126,10 @@ def _patched(**overrides):
     targets = {
         "licence": ("notify_bot.scheduler.jobs.check_by_licence", AsyncMock(return_value=[])),
         "plate": ("notify_bot.scheduler.jobs.check_by_plate", AsyncMock(return_value=[])),
-        "vignette": ("notify_bot.scheduler.jobs.check_vignette", AsyncMock(return_value=_DEFAULT_VIGNETTE)),
+        "vignette": (
+            "notify_bot.scheduler.jobs.check_vignette",
+            AsyncMock(return_value=_DEFAULT_VIGNETTE),
+        ),
         "vignette_boleron": (
             "notify_bot.scheduler.jobs.check_vignette_boleron",
             AsyncMock(return_value=BoleronVignetteInfo(found=False)),
@@ -151,7 +154,13 @@ def _patched(**overrides):
 
 @pytest.mark.asyncio
 async def test_report_is_none_when_user_has_no_identifiers():
-    user = {"user_id": 1, "first_name": "Test", "national_id": None, "driving_licence": None, "vehicle_plate": None}
+    user = {
+        "user_id": 1,
+        "first_name": "Test",
+        "national_id": None,
+        "driving_licence": None,
+        "vehicle_plate": None,
+    }
     with _patched():
         message = await _build_report_message(user)
     assert message is None
@@ -171,7 +180,11 @@ async def test_report_greets_with_fallback_name_when_missing():
 
 @pytest.mark.asyncio
 async def test_licence_obligations_section_included_on_success():
-    units = [Obligation(unit_group=1, unit_group_label="Road Traffic Act and/or Insurance Code", obligations=[])]
+    units = [
+        Obligation(
+            unit_group=1, unit_group_label="Road Traffic Act and/or Insurance Code", obligations=[]
+        )
+    ]
     with _patched(licence=AsyncMock(return_value=units)):
         message = await _build_report_message(_FULL_USER)
     assert "🪪 <b>By driving licence:</b>" in message
@@ -186,7 +199,11 @@ async def test_licence_check_failure_shows_error_line():
 
 @pytest.mark.asyncio
 async def test_plate_obligations_section_included_on_success():
-    units = [Obligation(unit_group=1, unit_group_label="Road Traffic Act and/or Insurance Code", obligations=[])]
+    units = [
+        Obligation(
+            unit_group=1, unit_group_label="Road Traffic Act and/or Insurance Code", obligations=[]
+        )
+    ]
     with _patched(plate=AsyncMock(return_value=units)):
         message = await _build_report_message(_FULL_USER)
     assert "🚗 <b>By vehicle plate (MVR):</b>" in message
@@ -231,7 +248,11 @@ async def test_vignette_not_found():
 @pytest.mark.asyncio
 async def test_vignette_cloudflare_error_falls_back_to_boleron_and_finds_one():
     bv = BoleronVignetteInfo(
-        found=True, active=True, valid_from="01.01.2026", valid_to="31.12.2026", validity_type="annual"
+        found=True,
+        active=True,
+        valid_from="01.01.2026",
+        valid_to="31.12.2026",
+        validity_type="annual",
     )
     with _patched(
         vignette=AsyncMock(side_effect=CloudflareBlockedError("blocked")),
@@ -264,7 +285,12 @@ async def test_report_omits_parking_sticker_section_when_not_found():
 @pytest.mark.asyncio
 async def test_report_includes_parking_sticker_section_when_found():
     sticker = StickerInfo(
-        plate=PLATE, found=True, status="Active", valid_from="01.01.2026", valid_to="31.12.2026", zone="A"
+        plate=PLATE,
+        found=True,
+        status="Active",
+        valid_from="01.01.2026",
+        valid_to="31.12.2026",
+        zone="A",
     )
     with _patched(sticker_and_clamp=AsyncMock(return_value=(sticker, _DEFAULT_CLAMP))):
         message = await _build_report_message(_FULL_USER)
@@ -363,7 +389,9 @@ async def test_mtpl_error_skips_section_without_failing_report():
 
 @pytest.mark.asyncio
 async def test_fines_present_with_discount():
-    fines = FinesResult(has_fines=True, count=2, total=100.0, total_discount=70.0, currency_symbol="€")
+    fines = FinesResult(
+        has_fines=True, count=2, total=100.0, total_discount=70.0, currency_symbol="€"
+    )
     with _patched(fines=AsyncMock(return_value=fines)):
         message = await _build_report_message(_FULL_USER)
     assert "🚔 <b>Traffic Fines:</b>" in message
@@ -404,7 +432,13 @@ async def test_send_user_report_now_sends_and_returns_true_when_something_to_rep
 
 @pytest.mark.asyncio
 async def test_send_user_report_now_returns_false_when_nothing_to_report():
-    user = {"user_id": 1, "first_name": "Test", "national_id": None, "driving_licence": None, "vehicle_plate": None}
+    user = {
+        "user_id": 1,
+        "first_name": "Test",
+        "national_id": None,
+        "driving_licence": None,
+        "vehicle_plate": None,
+    }
     context = MagicMock()
     context.bot.send_message = AsyncMock()
     with _patched():
@@ -426,7 +460,10 @@ async def test_daily_obligations_report_schedules_one_job_per_user():
     context.job_queue.run_once = MagicMock()
 
     with (
-        patch("notify_bot.scheduler.jobs.db.get_all_approved_with_profiles", AsyncMock(return_value=users)),
+        patch(
+            "notify_bot.scheduler.jobs.db.get_all_approved_with_profiles",
+            AsyncMock(return_value=users),
+        ),
         patch("notify_bot.scheduler.jobs.random.randint", return_value=300),
     ):
         await daily_obligations_report(context)

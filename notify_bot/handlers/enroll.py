@@ -17,6 +17,7 @@ import logging
 import re
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import BadRequest
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -31,7 +32,7 @@ from notify_bot.errors import format_error
 from notify_bot.middlewares import require_approved
 
 # Exported for run_bot registration
-__all__ = ["build_enroll_handler", "unenroll_command"]
+__all__ = ["build_enroll_handler", "build_stale_enroll_button_handler", "unenroll_command"]
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,9 @@ async def received_national_id(update: Update, context: ContextTypes.DEFAULT_TYP
             context, update.effective_user.id, "enroll_national_id", "national_id"
         )
         retry_hint = "Try again or /skip." if can_skip else "Try again, or /cancel to quit."
-        await update.message.reply_text(f"❌ Invalid EGN — must be exactly 10 digits.  {retry_hint}")
+        await update.message.reply_text(
+            f"❌ Invalid EGN — must be exactly 10 digits.  {retry_hint}"
+        )
         return ASK_NATIONAL_ID
 
     context.user_data["enroll_national_id"] = text
@@ -208,7 +211,8 @@ async def skip_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     )
     if not raw:
         await update.effective_message.reply_text(
-            "❌ You don't have a saved Driving Licence to skip — please enter one, or /cancel to quit."
+            "❌ You don't have a saved Driving Licence to skip — "
+            "please enter one, or /cancel to quit."
         )
         return ASK_LICENCE
     return await _ask_plate(update, context)
@@ -253,10 +257,13 @@ async def received_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def skip_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await _ack_callback(update)
-    raw, _ = await _current_value(context, update.effective_user.id, "enroll_plate", "vehicle_plate")
+    raw, _ = await _current_value(
+        context, update.effective_user.id, "enroll_plate", "vehicle_plate"
+    )
     if not raw:
         await update.effective_message.reply_text(
-            "❌ You don't have a saved Vehicle Plate to skip — please enter one, or /cancel to quit."
+            "❌ You don't have a saved Vehicle Plate to skip — "
+            "please enter one, or /cancel to quit."
         )
         return ASK_PLATE
     return await _ask_talon(update, context)
@@ -375,6 +382,23 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+async def stale_enroll_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle a wizard button tapped after the wizard already ended.
+
+    The Skip/Back/Cancel keyboards stay on old prompts after /cancel, a save,
+    or a restart, but ConversationHandler only routes those callbacks while a
+    conversation is active — an unclaimed tap would leave the button stuck
+    on its loading spinner. Answer it, and strip the dead keyboard.
+    """
+    query = update.callback_query
+    await query.answer("This enrollment session has ended — use /enroll to start again.")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except BadRequest:
+        # Message too old to edit, or keyboard already gone — nothing to clean up.
+        logger.debug("Could not clear stale enroll keyboard", exc_info=True)
+
+
 # ── De-registration ──────────────────────────────────────────────────────────
 
 
@@ -456,3 +480,12 @@ def build_enroll_handler() -> ConversationHandler:
         # Allow re-entry so users can run /enroll again to update their data
         allow_reentry=True,
     )
+
+
+def build_stale_enroll_button_handler() -> CallbackQueryHandler:
+    """Catch-all for "enroll:*" taps the ConversationHandler didn't claim.
+
+    Must be registered *after* build_enroll_handler() so live wizard buttons
+    reach their step handlers first.
+    """
+    return CallbackQueryHandler(stale_enroll_button, pattern=r"^enroll:")

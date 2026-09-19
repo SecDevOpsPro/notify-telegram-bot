@@ -17,6 +17,8 @@ from datetime import datetime
 
 import httpx
 
+from notify_bot.dates import format_date, parse_datetime
+
 logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://check.bgtoll.bg/check/vignette/plate"
@@ -125,23 +127,18 @@ def _format_validity_date(value: str) -> str:
 
     "07.06.2026 00:00:00" -> "07.06.2026"
     "06.06.2027 23:59:59" -> "06.06.2027 (Including)"
-    Any other value (already date-only, or an unexpected time) passes through.
+    ISO timestamps are normalized to ``dd.mm.yyyy`` the same way. Any other
+    value (unparseable, or an unexpected time of day) passes through.
     """
-    if value.endswith(" 00:00:00"):
-        return value[: -len(" 00:00:00")]
-    if value.endswith(" 23:59:59"):
-        return value[: -len(" 23:59:59")] + " (Including)"
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return value
+    clock = (parsed.hour, parsed.minute, parsed.second)
+    if clock == (0, 0, 0):
+        return format_date(parsed)
+    if clock == (23, 59, 59):
+        return f"{format_date(parsed)} (Including)"
     return value
-
-
-def _parse_bg_datetime(value: str) -> datetime | None:
-    """Parse a ``dd.mm.yyyy`` or ``dd.mm.yyyy HH:MM:SS`` string; ``None`` if unrecognized."""
-    for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y"):
-        try:
-            return datetime.strptime(value, fmt)
-        except ValueError:
-            continue
-    return None
 
 
 def format_validity_period(valid_from: str | None, valid_to: str | None) -> list[str]:
@@ -156,9 +153,9 @@ def format_validity_period(valid_from: str | None, valid_to: str | None) -> list
     if not valid_from:
         return []
 
-    start_dt = _parse_bg_datetime(valid_from)
+    start_dt = parse_datetime(valid_from)
     if start_dt is not None and start_dt <= datetime.now():
-        lines = [f"📅 Started: {valid_from.split(' ', 1)[0]}"]
+        lines = [f"📅 Started: {format_date(start_dt)}"]
         if valid_to:
             lines.append(f"📅 Ends: {_format_validity_date(valid_to)}")
         return lines

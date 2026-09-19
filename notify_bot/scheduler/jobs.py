@@ -16,12 +16,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import date, datetime
+from datetime import date
 from typing import Any, Callable, Coroutine, Type
 
 from telegram.ext import ContextTypes
 
 from notify_bot import db
+from notify_bot.dates import parse_datetime
 from notify_bot.services.bgtoll import (
     BgtollError,
     CloudflareBlockedError,
@@ -76,20 +77,14 @@ def _days_until(date_str: str | None) -> int | None:
     """
     Return the number of days between today and *date_str*.
 
-    Accepts ``dd.mm.yyyy`` (Bulgarian display format) and
-    ``yyyy-mm-dd`` / ISO-8601 strings.  Returns ``None`` when the
-    input is absent or unparseable.
+    Accepts anything :func:`notify_bot.dates.parse_datetime` understands
+    (``dd.mm.yyyy`` and ISO-8601, with or without a time).  Returns ``None``
+    when the input is absent or unparseable.
     """
-    if not date_str:
+    parsed = parse_datetime(date_str)
+    if parsed is None:
         return None
-    today = date.today()
-    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
-        try:
-            exp = datetime.strptime(date_str[:10], fmt).date()
-            return (exp - today).days
-        except ValueError:
-            continue
-    return None
+    return (parsed.date() - date.today()).days
 
 
 # ── Retry helper ──────────────────────────────────────────────────────────────

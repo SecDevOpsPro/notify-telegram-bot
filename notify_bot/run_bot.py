@@ -42,7 +42,11 @@ from notify_bot.handlers.admin import (
     users_cmd,
 )
 from notify_bot.handlers.common import help_command, request_access, start, unknown_command
-from notify_bot.handlers.enroll import build_enroll_handler, unenroll_command
+from notify_bot.handlers.enroll import (
+    build_enroll_handler,
+    build_stale_enroll_button_handler,
+    unenroll_command,
+)
 from notify_bot.handlers.eur import eur_command
 from notify_bot.handlers.obligations import (
     clamp_command,
@@ -84,9 +88,7 @@ def _setup_error_file_handler() -> None:
         )
         logging.getLogger().addHandler(handler)
     except OSError as exc:
-        logger.warning(
-            "Could not set up error log file at %s: %s", config.LOG_FILE_PATH, exc
-        )
+        logger.warning("Could not set up error log file at %s: %s", config.LOG_FILE_PATH, exc)
 
 
 def _register_atexit_logout(token: str) -> None:
@@ -116,9 +118,7 @@ async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> 
     """Global error handler. Stops the bot on Conflict (duplicate instance)."""
     err = context.error
     if isinstance(err, telegram.error.Conflict):
-        logger.critical(
-            "Conflict: another bot instance is running. Stopping this instance."
-        )
+        logger.critical("Conflict: another bot instance is running. Stopping this instance.")
         # Schedule a graceful stop so the event loop can wind down cleanly.
         context.application.stop_running()
         return
@@ -204,6 +204,8 @@ def run_bot() -> None:
 
     # ── ConversationHandlers must come first ──────────────────────────────────
     application.add_handler(build_enroll_handler())
+    # Wizard buttons tapped after the wizard ended — must follow the handler above.
+    application.add_handler(build_stale_enroll_button_handler())
 
     # ── Public commands ───────────────────────────────────────────────────────
     application.add_handler(CommandHandler("start", start))

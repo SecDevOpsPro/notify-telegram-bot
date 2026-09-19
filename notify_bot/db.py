@@ -117,6 +117,7 @@ async def _column_exists(conn: aiosqlite.Connection, table: str, column: str) ->
         rows = await cur.fetchall()
     return any(row[1] == column for row in rows)
 
+
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 
@@ -218,9 +219,7 @@ async def list_users_by_status(status: str) -> list[dict]:
 
 async def get_profile(user_id: int) -> Optional[dict]:
     async with _locked_conn() as conn:
-        async with conn.execute(
-            "SELECT * FROM user_profiles WHERE user_id = ?", (user_id,)
-        ) as cur:
+        async with conn.execute("SELECT * FROM user_profiles WHERE user_id = ?", (user_id,)) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 

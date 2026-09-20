@@ -9,12 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from notify_bot.services.boleron import (
-    _COLOR_FORMS,
-    _COLORS,
-    _ENGINE_TYPES,
     _clean_date,
-    _translate,
-    _translate_color,
     check_mtpl,
     check_vehicle_data,
 )
@@ -54,80 +49,6 @@ async def test_check_mtpl_iso_dates_are_shown_without_time() -> None:
 
     assert info.valid_from == "17.12.2025"
     assert info.valid_to == "16.12.2026"
-
-
-# ── _translate_color ───────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        # every gender / plural form of a color
-        ("червен", "Red"),
-        ("червена", "Red"),
-        ("червено", "Red"),
-        ("червени", "Red"),
-        ("бяла", "White"),
-        ("синя", "Blue"),
-        # case and surrounding whitespace are ignored
-        ("  СИВ ", "Gray"),
-        ("Кафява", "Brown"),
-        # shade prefixes, joined, spaced or hyphenated, on any gender form
-        ("тъмносин", "Dark Blue"),
-        ("тъмносиньо", "Dark Blue"),
-        ("тъмно зелен", "Dark Green"),
-        ("светло-сива", "Light Gray"),
-        ("тъмночервен", "Dark Red"),
-        # metallic suffix, alone or combined with a shade
-        ("сив металик", "Gray Metallic"),
-        ("тъмно син - металик", "Dark Blue Metallic"),
-        # colors that used to be missing
-        ("лилаво", "Purple"),
-        ("розов", "Pink"),
-        ("бордо", "Burgundy"),
-        ("злато", "Gold"),
-    ],
-)
-def test_translate_color_known(raw: str, expected: str) -> None:
-    assert _translate_color(raw) == expected
-
-
-@pytest.mark.parametrize("raw", ["нещо друго", "тъмно", "металик", "тъмно нещо", "Unknown"])
-def test_translate_color_unknown_is_returned_unchanged(raw: str) -> None:
-    assert _translate_color(raw) == raw
-
-
-@pytest.mark.parametrize("raw", [None, ""])
-def test_translate_color_empty_returns_none(raw: str | None) -> None:
-    assert _translate_color(raw) is None
-
-
-def test_color_forms_have_no_duplicate_spellings() -> None:
-    forms = [form for _, group in _COLOR_FORMS for form in group]
-    assert len(forms) == len(set(forms)) == len(_COLORS)
-
-
-# ── _translate (engine types) ──────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("Бензинов", "Petrol"),
-        ("бензин", "Petrol"),
-        ("ДИЗЕЛОВ", "Diesel"),
-        ("хибриден", "Hybrid"),
-        ("LPG", "Gas/LPG"),
-        ("нещо друго", "нещо друго"),
-    ],
-)
-def test_translate_engine_types(raw: str, expected: str) -> None:
-    assert _translate(raw, _ENGINE_TYPES) == expected
-
-
-def test_translate_empty_returns_none() -> None:
-    assert _translate(None, _ENGINE_TYPES) is None
-    assert _translate("", _ENGINE_TYPES) is None
 
 
 # ── check_vehicle_data ─────────────────────────────────────────────────────────

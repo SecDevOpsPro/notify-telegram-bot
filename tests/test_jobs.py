@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from notify_bot.scheduler.jobs import (
-    _build_report_message,
+    _build_report,
     _days_until,
     _retry,
     daily_obligations_report,
@@ -35,6 +35,12 @@ _FULL_USER = {
     "driving_licence": "123456789",
     "vehicle_plate": PLATE,
 }
+
+
+async def _report_text(user) -> str | None:
+    """The text of *user*'s report, or None when there is nothing to report."""
+    report = await _build_report(user)
+    return report.text if report else None
 
 
 def _soon(days: int) -> str:
@@ -110,7 +116,7 @@ async def test_retry_does_not_retry_skip_on_exceptions():
     mock_sleep.assert_not_called()
 
 
-# ── _build_report_message: defaults + patch helper ──────────────────────────
+# ── _build_report: defaults + patch helper ──────────────────────────
 
 _DEFAULT_VIGNETTE = VignetteInfo(plate=PLATE, country="BG", found=False)
 _DEFAULT_STICKER = StickerInfo(plate=PLATE, found=False)
@@ -123,7 +129,7 @@ _DEFAULT_FINES = FinesResult(has_fines=False, count=0, total=0.0, total_discount
 @contextmanager
 def _patched(**overrides):
     """
-    Patch every external check `_build_report_message` calls with an
+    Patch every external check `_build_report` calls with an
     "nothing found" default, then apply per-test overrides on top.
 
     ``overrides`` maps a short name (licence, plate, vignette, vignette_boleron,
@@ -156,7 +162,7 @@ def _patched(**overrides):
         yield
 
 
-# ── _build_report_message: top-level behavior ────────────────────────────────
+# ── _build_report: top-level behavior ────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -169,7 +175,7 @@ async def test_report_is_none_when_user_has_no_identifiers():
         "vehicle_plate": None,
     }
     with _patched():
-        message = await _build_report_message(user)
+        message = await _report_text(user)
     assert message is None
 
 
@@ -177,7 +183,7 @@ async def test_report_is_none_when_user_has_no_identifiers():
 async def test_report_greets_with_fallback_name_when_missing():
     user = {**_FULL_USER, "first_name": None, "national_id": None, "driving_licence": None}
     with _patched():
-        message = await _build_report_message(user)
+        message = await _report_text(user)
     assert message is not None
     assert message.startswith("☀️ Good morning, there!")
 
@@ -193,14 +199,14 @@ async def test_licence_obligations_section_included_on_success():
         )
     ]
     with _patched(licence=AsyncMock(return_value=units)):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert "🪪 <b>By driving licence:</b>" in message
 
 
 @pytest.mark.asyncio
 async def test_licence_check_failure_shows_error_line():
     with _patched(licence=AsyncMock(side_effect=MVRApiError("MVR API returned HTTP 500"))):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert "🪪 <b>By driving licence:</b>\n⚠️ Check failed: MVR API returned HTTP 500" in message
 
 
@@ -212,14 +218,14 @@ async def test_plate_obligations_section_included_on_success():
         )
     ]
     with _patched(plate=AsyncMock(return_value=units)):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert "🚗 <b>By vehicle plate (MVR):</b>" in message
 
 
 @pytest.mark.asyncio
 async def test_plate_check_failure_shows_error_line():
     with _patched(plate=AsyncMock(side_effect=MVRApiError("boom"))):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert "🚗 <b>By vehicle plate (MVR):</b>\n⚠️ Check failed: boom" in message
 
 
@@ -238,7 +244,7 @@ async def test_vignette_found_valid_shows_expiry_warning():
         vignette_type="Annual",
     )
     with _patched(vignette=AsyncMock(return_value=vignette)):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert f"🛣️ <b>Vignette ({PLATE}):</b>" in message
     assert "✅ Status: Active" in message
     assert "📋 Type: Annual" in message
@@ -248,7 +254,7 @@ async def test_vignette_found_valid_shows_expiry_warning():
 @pytest.mark.asyncio
 async def test_vignette_not_found():
     with _patched():
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert f"🛣️ <b>Vignette ({PLATE}):</b>\n❌ No active vignette found." in message
 
 
@@ -265,7 +271,7 @@ async def test_vignette_cloudflare_error_falls_back_to_boleron_and_finds_one():
         vignette=AsyncMock(side_effect=CloudflareBlockedError("blocked")),
         vignette_boleron=AsyncMock(return_value=bv),
     ):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert f"🛣️ <b>Vignette ({PLATE}):</b>" in message
     assert "✅ Status: Active" in message
     assert "📋 Type: Annual" in message
@@ -274,7 +280,7 @@ async def test_vignette_cloudflare_error_falls_back_to_boleron_and_finds_one():
 @pytest.mark.asyncio
 async def test_vignette_bgtoll_error_falls_back_to_boleron_not_found():
     with _patched(vignette=AsyncMock(side_effect=BgtollError("connection error"))):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert f"🛣️ <b>Vignette ({PLATE}):</b>\n❌ No active vignette found." in message
 
 
@@ -285,7 +291,7 @@ async def test_vignette_bgtoll_error_falls_back_to_boleron_not_found():
 async def test_report_omits_parking_sticker_section_when_not_found():
     """No news is good news: an absent sticker shouldn't clutter the daily digest."""
     with _patched():
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert "Parking sticker" not in message
 
 
@@ -300,7 +306,7 @@ async def test_report_includes_parking_sticker_section_when_found():
         zone="A",
     )
     with _patched(sticker_and_clamp=AsyncMock(return_value=(sticker, _DEFAULT_CLAMP))):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert f"🅿️ <b>Parking sticker ({PLATE}):</b>" in message
     assert "✅ Status: Active" in message
     assert "📅 Valid: 01.01.2026 → 31.12.2026" in message
@@ -311,7 +317,7 @@ async def test_report_includes_parking_sticker_section_when_found():
 async def test_report_omits_wheel_clamp_section_when_not_clamped():
     clamp = ClampInfo(plate=PLATE, found=True, clamped=False)
     with _patched(sticker_and_clamp=AsyncMock(return_value=(_DEFAULT_STICKER, clamp))):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert "Wheel clamp" not in message
 
 
@@ -319,7 +325,7 @@ async def test_report_omits_wheel_clamp_section_when_not_clamped():
 async def test_report_includes_wheel_clamp_section_when_clamped():
     clamp = ClampInfo(plate=PLATE, found=True, clamped=True, clamped_at="10:00", location="Main St")
     with _patched(sticker_and_clamp=AsyncMock(return_value=(_DEFAULT_STICKER, clamp))):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert f"🔒 <b>Wheel clamp ({PLATE}):</b>" in message
     assert "❌ Vehicle <b>IS wheel-clamped!</b>" in message
 
@@ -327,7 +333,7 @@ async def test_report_includes_wheel_clamp_section_when_clamped():
 @pytest.mark.asyncio
 async def test_sticker_clamp_check_skipped_silently_on_cloudflare_error():
     with _patched(sticker_and_clamp=AsyncMock(side_effect=SofiaTrafficError("blocked"))):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert "Parking sticker" not in message
     assert "Wheel clamp" not in message
 
@@ -339,7 +345,7 @@ async def test_sticker_clamp_check_skipped_silently_on_cloudflare_error():
 async def test_gtp_found_shows_expiry_warning():
     gtp = GtpInfo(found=True, valid_to=_soon(3))
     with _patched(gtp=AsyncMock(return_value=gtp)):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert f"🔧 <b>Technical Inspection ({PLATE}):</b>" in message
     assert f"✅ Valid until: {_soon(3)}" in message
     assert "⚠️ Expires in 3 days!" in message
@@ -348,14 +354,14 @@ async def test_gtp_found_shows_expiry_warning():
 @pytest.mark.asyncio
 async def test_gtp_not_found():
     with _patched():
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert f"🔧 <b>Technical Inspection ({PLATE}):</b>\n❌ No valid inspection found." in message
 
 
 @pytest.mark.asyncio
 async def test_gtp_error_skips_section_without_failing_report():
     with _patched(gtp=AsyncMock(side_effect=BoleronError("boom"))):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert message is not None
     assert "Technical Inspection" not in message
 
@@ -367,7 +373,7 @@ async def test_gtp_error_skips_section_without_failing_report():
 async def test_mtpl_active_with_insurer_and_expiry_warning():
     mtpl = MtplInfo(active=True, insurer="Bulstrad", valid_to=_soon(7))
     with _patched(mtpl=AsyncMock(return_value=mtpl)):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert f"🛡️ <b>Civil Liability / MTPL ({PLATE}):</b>" in message
     assert "✅ Active" in message
     assert "🏢 Bulstrad" in message
@@ -378,7 +384,7 @@ async def test_mtpl_active_with_insurer_and_expiry_warning():
 @pytest.mark.asyncio
 async def test_mtpl_inactive_shows_no_active_policy():
     with _patched():
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert f"🛡️ <b>Civil Liability / MTPL ({PLATE}):</b>" in message
     assert "❌ No active policy" in message
 
@@ -386,7 +392,7 @@ async def test_mtpl_inactive_shows_no_active_policy():
 @pytest.mark.asyncio
 async def test_mtpl_error_skips_section_without_failing_report():
     with _patched(mtpl=AsyncMock(side_effect=BoleronError("boom"))):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert message is not None
     assert "Civil Liability" not in message
 
@@ -400,7 +406,7 @@ async def test_fines_present_with_discount():
         has_fines=True, count=2, total=100.0, total_discount=70.0, currency_symbol="€"
     )
     with _patched(fines=AsyncMock(return_value=fines)):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert "🚔 <b>Traffic Fines:</b>" in message
     assert "❌ 2 fine(s) — Total: 100.00 €" in message
     assert "💸 With discount: 70.00 €" in message
@@ -409,16 +415,81 @@ async def test_fines_present_with_discount():
 @pytest.mark.asyncio
 async def test_fines_none_are_omitted():
     with _patched():
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert "Traffic Fines" not in message
 
 
 @pytest.mark.asyncio
 async def test_fines_error_skips_section_without_failing_report():
     with _patched(fines=AsyncMock(side_effect=BoleronError("boom"))):
-        message = await _build_report_message(_FULL_USER)
+        message = await _report_text(_FULL_USER)
     assert message is not None
     assert "Traffic Fines" not in message
+
+
+# ── Fine shortcut buttons (/driver, /plate) ───────────────────────────────────
+
+_FINE_GROUP = Obligation(
+    unit_group=1,
+    unit_group_label="Road Traffic Act and/or Insurance Code",
+    obligations=[{"amount": 51.13, "iban": "BG64BNBG96613100147701", "currency": "EUR"}],
+)
+
+
+async def _callbacks(**patches) -> list[str | None]:
+    with _patched(**patches):
+        report = await _build_report(_FULL_USER)
+    assert report is not None
+    if report.reply_markup is None:
+        return []
+    return [b.callback_data for row in report.reply_markup.inline_keyboard for b in row]
+
+
+@pytest.mark.asyncio
+async def test_report_offers_driver_button_when_licence_lookup_found_fines():
+    assert await _callbacks(licence=AsyncMock(return_value=[_FINE_GROUP])) == ["cmd:driver"]
+
+
+@pytest.mark.asyncio
+async def test_report_offers_plate_button_when_plate_lookup_found_fines():
+    assert await _callbacks(plate=AsyncMock(return_value=[_FINE_GROUP])) == ["cmd:plate"]
+
+
+@pytest.mark.asyncio
+async def test_report_offers_both_buttons_when_both_lookups_found_fines():
+    callbacks = await _callbacks(
+        licence=AsyncMock(return_value=[_FINE_GROUP]),
+        plate=AsyncMock(return_value=[_FINE_GROUP]),
+    )
+    assert callbacks == ["cmd:driver", "cmd:plate"]
+
+
+@pytest.mark.asyncio
+async def test_report_has_no_buttons_when_lookups_found_no_fines():
+    assert await _callbacks() == []
+
+
+@pytest.mark.asyncio
+async def test_report_has_no_buttons_when_the_lookup_failed():
+    assert await _callbacks(licence=AsyncMock(side_effect=MVRApiError("boom"))) == []
+
+
+@pytest.mark.asyncio
+async def test_report_never_carries_copy_buttons():
+    """Copy buttons live in the per-fine messages /driver and /plate send, not the report."""
+    with _patched(licence=AsyncMock(return_value=[_FINE_GROUP])):
+        report = await _build_report(_FULL_USER)
+    assert report is not None and report.reply_markup is not None
+    assert not any(b.copy_text for row in report.reply_markup.inline_keyboard for b in row)
+
+
+@pytest.mark.asyncio
+async def test_send_user_report_now_attaches_the_shortcut_buttons():
+    context = MagicMock()
+    context.bot.send_message = AsyncMock()
+    with _patched(licence=AsyncMock(return_value=[_FINE_GROUP])):
+        await send_user_report_now(context, _FULL_USER)
+    assert context.bot.send_message.call_args.kwargs["reply_markup"] is not None
 
 
 # ── send_user_report_now ──────────────────────────────────────────────────────

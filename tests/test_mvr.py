@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -14,6 +15,7 @@ from notify_bot.services.mvr import (
     _parse,
     check_by_licence,
     check_by_plate,
+    render_fine_messages,
     render_obligations,
 )
 
@@ -136,6 +138,12 @@ async def test_check_by_plate_success():
 # ── _format_obligation / render_obligations ──────────────────────────────────
 
 
+def _due(days_from_today: int) -> tuple[str, str]:
+    """An ``expirationDate`` the API would send, plus the ``dd.mm.yyyy`` we display for it."""
+    due = date.today() + timedelta(days=days_from_today)
+    return f"{due:%Y-%m-%d}T23:59:59", f"{due:%d.%m.%Y}"
+
+
 def test_format_obligation_plain_string_passthrough():
     assert _format_obligation("Speeding fine") == "Speeding fine"
 
@@ -148,7 +156,7 @@ def test_format_obligation_full_payment_dict():
         "bic": "BNBGBGSF",
         "iban": "BG64BNBG96613100147701",
         "paymentReason": "ЕЛ.ФИШ СЕРИЯ K 13247956 24.08.2026",
-        "expirationDate": "2026-08-25T23:59:59",
+        "expirationDate": _due(10)[0],
         "currency": "EUR",
         "additionalData": {
             "documentType": "TICKET",
@@ -162,7 +170,7 @@ def test_format_obligation_full_payment_dict():
     result = _format_obligation(ob)
 
     assert "💰 Amount: 51.13 EUR" in result
-    assert "💸 With discount: 35.79 EUR (if paid by 25.08.2026)" in result
+    assert f"💸 With discount: 35.79 EUR (if paid by {_due(10)[1]})" in result
     assert "📄 Ticket: K 13247956" in result
     assert "🚗 Vehicle: XH2856" in result
     assert "⚖️ Violation: Art. 21, para. 2, of the Road Traffic Act (22.08.2026)" in result
@@ -171,6 +179,32 @@ def test_format_obligation_full_payment_dict():
     assert "IBAN:   <code>BG64BNBG96613100147701</code>" in result
     assert "BIC:    BNBGBGSF" in result
     assert "Reason: ЕЛ.ФИШ СЕРИЯ K 13247956 24.08.2026" in result
+
+
+def test_format_obligation_expired_discount_is_struck_through_and_marked_expired():
+    expiration, shown = _due(-1)
+    ob = {"amount": 51.13, "discountAmount": 35.79, "currency": "EUR", "expirationDate": expiration}
+
+    result = _format_obligation(ob)
+
+    assert f"💸 <s>With discount: 35.79 EUR</s> (expired {shown})" in result
+    assert "if paid by" not in result
+
+
+def test_format_obligation_discount_still_valid_on_its_last_day():
+    expiration, shown = _due(0)
+    ob = {"amount": 51.13, "discountAmount": 35.79, "currency": "EUR", "expirationDate": expiration}
+
+    result = _format_obligation(ob)
+
+    assert f"💸 With discount: 35.79 EUR (if paid by {shown})" in result
+    assert "expired" not in result
+
+
+def test_format_obligation_discount_without_expiration_date_is_not_marked_expired():
+    ob = {"amount": 51.13, "discountAmount": 35.79, "currency": "EUR"}
+    assert "💸 With discount: 35.79 EUR" in _format_obligation(ob)
+    assert "expired" not in _format_obligation(ob)
 
 
 def test_format_obligation_document_reference_unknown_type_falls_back_to_generic_label():
@@ -240,6 +274,103 @@ def test_render_obligations_blank_line_between_multiple_entries():
     rendered = render_obligations(units)
 
     assert "💰 Amount: 10.00 EUR\n\n  • 💰 Amount: 20.00 EUR" in rendered
+
+
+# ── render_fine_messages ─────────────────────────────────────────────────────
+
+_ROAD_LAW = "Road Traffic Act and/or Insurance Code"
+_DOCS_LAW = "Law for Bulgarian Personal Documents"
+
+
+def _fine(number: str, amount: float = 51.13) -> dict:
+    return {
+        "amount": amount,
+        "iban": "BG64BNBG96613100147701",
+        "bic": "BNBGBGSF",
+        "paymentReason": f"ЕЛ.ФИШ СЕРИЯ K {number}",
+        "currency": "EUR",
+        "additionalData": {"documentSeries": "K", "documentNumber": number},
+    }
+
+
+def _group(*obligations, label: str = _ROAD_LAW) -> Obligation:
+    return Obligation(unit_group=1, unit_group_label=label, obligations=list(obligations))
+
+
+def test_fine_messages_is_one_message_when_nothing_is_payable():
+    messages = render_fine_messages([_group("Speeding fine")])
+
+    assert len(messages) == 1
+    assert messages[0].payment is None
+    assert messages[0].text.startswith("<b>🔎 Obligations check</b>")
+    assert "Speeding fine" in messages[0].text
+
+
+def test_fine_messages_is_one_message_for_a_single_fine():
+    units = [_group(_fine("13247956"))]
+
+    messages = render_fine_messages(units)
+
+    assert len(messages) == 1
+    assert messages[0].text == "<b>🔎 Obligations check</b>\n" + render_obligations(units)
+    assert messages[0].payment is not None
+    assert messages[0].payment.reference == "K 13247956"
+
+
+def test_fine_messages_gives_every_fine_its_own_message():
+    messages = render_fine_messages([_group(_fine("13247956"), _fine("13247999", 25.0))])
+
+    assert len(messages) == 3  # summary + one per fine
+    assert messages[0].payment is None
+    first, second = messages[1], messages[2]
+    assert "<b>Fine 1 of 2 · K 13247956</b>" in first.text
+    assert "<b>Fine 2 of 2 · K 13247999</b>" in second.text
+    assert first.payment is not None and first.payment.reference == "K 13247956"
+    assert second.payment is not None and second.payment.reference == "K 13247999"
+    # Each message carries only its own fine's details.
+    assert "ЕЛ.ФИШ СЕРИЯ K 13247956" in first.text
+    assert "K 13247999" not in first.text
+    assert "💰 Amount: 25.00 EUR" in second.text
+
+
+def test_fine_message_is_not_indented_like_a_bullet_entry():
+    messages = render_fine_messages([_group(_fine("1"), _fine("2"))])
+
+    assert "\n    " not in messages[1].text
+    assert "  • " not in messages[1].text
+
+
+def test_fine_summary_counts_fines_without_repeating_bank_details():
+    summary = render_fine_messages([_group(_fine("1"), _fine("2"))])[0].text
+
+    assert _ROAD_LAW in summary
+    assert "💳 2 unpaid fines — sent below" in summary
+    assert "IBAN" not in summary
+
+
+def test_fine_summary_keeps_entries_that_are_not_payable_by_bank():
+    messages = render_fine_messages([_group(_fine("1"), _fine("2"), "Missing insurance")])
+
+    assert len(messages) == 3
+    assert "Missing insurance" in messages[0].text
+
+
+def test_fine_numbering_runs_across_law_groups():
+    messages = render_fine_messages(
+        [_group(_fine("1")), _group(_fine("2"), label=_DOCS_LAW)],
+    )
+
+    assert "Fine 1 of 2" in messages[1].text
+    assert "Fine 2 of 2" in messages[2].text
+    assert messages[0].text.count("💳 1 unpaid fine — sent below") == 2
+
+
+def test_fine_title_omits_the_number_when_the_api_sent_none():
+    bare = {"amount": 10.0, "iban": "BG11AAAA11111111111111", "currency": "EUR"}
+
+    messages = render_fine_messages([_group(bare, dict(bare))])
+
+    assert "<b>Fine 1 of 2</b>" in messages[1].text
 
 
 @pytest.mark.asyncio

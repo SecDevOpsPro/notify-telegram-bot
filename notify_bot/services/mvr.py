@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 import httpx
 from jinja2 import Template
 
 from notify_bot import config
+from notify_bot.dates import parse_datetime
 from notify_bot.translation import translate_breach
 
 logger = logging.getLogger(__name__)
@@ -189,6 +191,9 @@ async def check_by_plate(*, national_id: str, plate_number: str) -> list[Obligat
 
 # ── Formatting ────────────────────────────────────────────────────────────────
 
+#: Title line of every obligations-check message (/driver, /plate).
+_CHECK_TITLE = "<b>🔎 Obligations check</b>\n"
+
 _OBLIGATIONS_TEMPLATE: Template = Template(
     "{% for unit in units %}\n"
     "<b>{{ unit.unit_group_label }}</b>\n"
@@ -216,8 +221,58 @@ _DOCUMENT_TYPE_LABELS: dict[str, str] = {
 }
 
 
-def _format_obligation(ob: RawObligation) -> str:
-    """Render one obligation as a human-readable payment summary.
+def _document_reference(extra: dict[str, Any]) -> str:
+    """The fine/document identifier, e.g. ``K 13247956`` — empty if the API sent none."""
+    return " ".join(
+        part for part in (extra.get("documentSeries"), extra.get("documentNumber")) if part
+    )
+
+
+def _discount_expired(ob: dict[str, Any]) -> bool:
+    """True once the last day the discounted amount can be paid (``expirationDate``) is past.
+
+    An obligation without a usable ``expirationDate`` is treated as still discounted:
+    better to offer a discount the bank may reject than to hide one that still applies.
+    """
+    due = parse_datetime(ob.get("expirationDate"))
+    return due is not None and due.date() < date.today()
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentDetails:
+    """The values a bank transfer form asks for, for one unpaid obligation."""
+
+    iban: str
+    reference: str  # fine/document number; empty when the API sent none
+    bic: str | None
+    reason: str | None
+    amount: float | None
+    discount: float | None  # only while it still applies and differs from ``amount``
+
+
+def payment_details(ob: RawObligation) -> PaymentDetails | None:
+    """Extract the bank-transfer values from *ob*, or ``None`` if it can't be paid by bank.
+
+    Mirrors what :func:`_format_obligation` prints under "Pay by bank transfer",
+    so the tap-to-copy buttons offer exactly the values shown in the message.
+    """
+    if not isinstance(ob, dict) or not ob.get("iban"):
+        return None
+    amount = ob.get("amount")
+    discount = ob.get("discountAmount")
+    usable_discount = bool(discount) and discount != amount and not _discount_expired(ob)
+    return PaymentDetails(
+        iban=ob["iban"],
+        reference=_document_reference(ob.get("additionalData") or {}),
+        bic=ob.get("bic") or None,
+        reason=ob.get("paymentReason") or None,
+        amount=amount,
+        discount=discount if usable_discount else None,
+    )
+
+
+def _obligation_lines(ob: RawObligation) -> list[str]:
+    """One obligation as a human-readable payment summary, one display line per entry.
 
     Unpaid obligations come back from the MVR API as dicts carrying the
     amount/discount, bank transfer details, and a nested ``additionalData``
@@ -226,7 +281,7 @@ def _format_obligation(ob: RawObligation) -> str:
     obligation types that carry no payment data) are passed through as-is.
     """
     if not isinstance(ob, dict):
-        return str(ob)
+        return [str(ob)]
 
     extra = ob.get("additionalData") or {}
     currency = ob.get("currency", "")
@@ -239,16 +294,18 @@ def _format_obligation(ob: RawObligation) -> str:
     if amount is not None:
         lines.append(f"💰 Amount: {amount:.2f} {currency}".rstrip())
     if discount and discount != amount:
-        discount_line = f"💸 With discount: {discount:.2f} {currency}".rstrip()
-        if due_by:
-            discount_line += f" (if paid by {due_by})"
-        lines.append(discount_line)
+        discount_text = f"With discount: {discount:.2f} {currency}".rstrip()
+        if _discount_expired(ob):
+            # Still shown, struck through, so it's clear the reduced amount can't be paid anymore.
+            lines.append(f"💸 <s>{discount_text}</s> (expired {due_by})")
+        elif due_by:
+            lines.append(f"💸 {discount_text} (if paid by {due_by})")
+        else:
+            lines.append(f"💸 {discount_text}")
 
-    doc_series = extra.get("documentSeries")
-    doc_number = extra.get("documentNumber")
-    if doc_series or doc_number:
+    reference = _document_reference(extra)
+    if reference:
         label = _DOCUMENT_TYPE_LABELS.get(extra.get("documentType") or "", "Document")
-        reference = " ".join(part for part in (doc_series, doc_number) if part)
         lines.append(f"📄 {label}: {reference}")
 
     breach = extra.get("breachOfOrder")
@@ -280,7 +337,12 @@ def _format_obligation(ob: RawObligation) -> str:
         lines.append("<b>🏦 Pay by bank transfer:</b>")
         lines.extend(f"   {(label + ':').ljust(label_width)}{value}" for label, value in fields)
 
-    return "\n    ".join(lines) if lines else str(ob)
+    return lines or [str(ob)]
+
+
+def _format_obligation(ob: RawObligation) -> str:
+    """One obligation as a bullet entry for :func:`render_obligations` (lines indented)."""
+    return "\n    ".join(_obligation_lines(ob))
 
 
 def render_obligations(units: list[Obligation]) -> str:
@@ -293,3 +355,47 @@ def render_obligations(units: list[Obligation]) -> str:
         for unit in units
     ]
     return _OBLIGATIONS_TEMPLATE.render(units=formatted_units)
+
+
+@dataclass(frozen=True, slots=True)
+class FineMessage:
+    """One chat message of an obligations check."""
+
+    text: str
+    payment: PaymentDetails | None = None  # set when the message is a payable fine
+
+
+def render_fine_messages(units: list[Obligation]) -> list[FineMessage]:
+    """Render an obligations check as the chat messages to send, in order.
+
+    With at most one fine payable by bank this is a single message. With several,
+    each gets its own message so its bank details — and the tap-to-copy buttons the
+    caller attaches from :attr:`FineMessage.payment` — sit right under it, behind a
+    summary message that carries everything else.
+    """
+    analysed = [[(ob, payment_details(ob)) for ob in unit.obligations] for unit in units]
+    fines = [(ob, pay) for group in analysed for ob, pay in group if pay]
+
+    if len(fines) <= 1:
+        text = _CHECK_TITLE + render_obligations(units)
+        return [FineMessage(text, fines[0][1] if fines else None)]
+
+    summary = [
+        _RenderedGroup(
+            unit_group_label=unit.unit_group_label,
+            obligations=[
+                *(_format_obligation(ob) for ob, pay in group if not pay),
+                *(
+                    [f"💳 {payable} unpaid fine{'s' if payable != 1 else ''} — sent below"]
+                    if (payable := sum(1 for _, pay in group if pay))
+                    else []
+                ),
+            ],
+        )
+        for unit, group in zip(units, analysed, strict=True)
+    ]
+    messages = [FineMessage(_CHECK_TITLE + _OBLIGATIONS_TEMPLATE.render(units=summary))]
+    for n, (ob, pay) in enumerate(fines, start=1):
+        title = f"Fine {n} of {len(fines)}" + (f" · {pay.reference}" if pay.reference else "")
+        messages.append(FineMessage("\n".join([f"<b>{title}</b>", *_obligation_lines(ob)]), pay))
+    return messages

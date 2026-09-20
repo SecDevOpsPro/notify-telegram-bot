@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+import warnings
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
@@ -27,6 +28,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.warnings import PTBUserWarning
 
 from notify_bot import db
 from notify_bot.errors import format_error
@@ -444,6 +446,19 @@ def build_enroll_handler() -> ConversationHandler:
     Build and return the fully configured ConversationHandler for /enroll.
     Must be registered *before* any plain CommandHandlers.
     """
+    # PTB warns whenever per_message=False and a CallbackQueryHandler is present,
+    # even when set explicitly. per_message=True is not an option here: it needs
+    # every handler to be a CallbackQueryHandler, but the wizard also takes
+    # commands and free-text replies. The per-user conversation is what we want,
+    # and stale buttons are caught by build_stale_enroll_button_handler().
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message="If 'per_message=False'", category=PTBUserWarning
+        )
+        return _build_enroll_conversation()
+
+
+def _build_enroll_conversation() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[
             CommandHandler("enroll", require_approved(enroll_start)),

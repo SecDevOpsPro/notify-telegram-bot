@@ -19,21 +19,29 @@ it's wired as an extra entry point on that handler instead (see enroll.py).
 from __future__ import annotations
 
 import logging
-from typing import Awaitable, Callable
+from typing import TypedDict, cast
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 from notify_bot import config, db
+from notify_bot.updates import HandlerCallback, require
 
 logger = logging.getLogger(__name__)
 
 _NOOP = "noop"
 
-_Handler = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
+
+class MenuPhase(TypedDict):
+    """Where the caller stands — decides which /help buttons they get."""
+
+    status: str
+    is_approved: bool
+    has_profile: bool
+    is_admin: bool
 
 
-def _dispatch_table() -> dict[str, _Handler]:
+def _dispatch_table() -> dict[str, HandlerCallback[None]]:
     # Imported lazily (rather than at module load) to avoid a circular import:
     # common.py imports this module to build the /help keyboard, and some of
     # these handler modules import from common.py.
@@ -77,7 +85,7 @@ def _dispatch_table() -> dict[str, _Handler]:
 # ── Phase resolution ─────────────────────────────────────────────────────────
 
 
-async def get_user_phase(user_id: int) -> dict:
+async def get_user_phase(user_id: int) -> MenuPhase:
     """Resolve the caller's phase: approval status, enrollment, admin-ness."""
     record = await db.get_user(user_id)
     status = record["status"] if record else "unknown"
@@ -120,7 +128,7 @@ def all_commands_row() -> list[InlineKeyboardButton]:
     return [InlineKeyboardButton("📜 All commands", callback_data="cmd:list_commands")]
 
 
-def build_help_keyboard(phase: dict) -> InlineKeyboardMarkup:
+def build_help_keyboard(phase: MenuPhase) -> InlineKeyboardMarkup:
     """Build the phase-appropriate inline keyboard shown under /help.
 
     Status (approved / enrolled) and role (admin) are independent axes: an
@@ -170,8 +178,7 @@ class _ButtonUpdate:
     unmodified.
     """
 
-    def __init__(self, update: Update) -> None:
-        message = update.callback_query.message
+    def __init__(self, update: Update, message: Message) -> None:
         self.effective_user = update.effective_user
         self.effective_chat = update.effective_chat
         self.message = message
@@ -180,7 +187,7 @@ class _ButtonUpdate:
 
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Dispatch every "cmd:<name>" button tap on the /help menu to its handler."""
-    query = update.callback_query
+    query = require(update.callback_query, "callback_query")
     await query.answer()
 
     _, _, action = (query.data or "").partition(":")
@@ -189,13 +196,22 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.warning("Unknown menu button callback_data=%s", query.data)
         return
 
+    # An old enough message is reported by Telegram as inaccessible: it has an id
+    # but no content, and none of the reply_* methods the handlers rely on.
+    message = query.message
+    if not isinstance(message, Message):
+        logger.warning("Menu button tapped on an inaccessible message: %s", query.data)
+        return
+
     context.args = []
-    await handler(_ButtonUpdate(update), context)
+    # _ButtonUpdate only implements the attributes handlers read (see its docstring),
+    # so it is not a real Update — hence the cast at this one hand-off point.
+    await handler(cast(Update, _ButtonUpdate(update, message)), context)
 
 
 async def noop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Section-header buttons are visual only — just clear the loading spinner."""
-    await update.callback_query.answer()
+    await require(update.callback_query, "callback_query").answer()
 
 
 def register(application: Application) -> None:

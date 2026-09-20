@@ -17,12 +17,13 @@ import asyncio
 import logging
 import random
 from datetime import date
-from typing import Any, Callable, Coroutine, Type
+from typing import Any, Callable, Coroutine, Type, cast
 
 from telegram.ext import ContextTypes
 
 from notify_bot import db
 from notify_bot.dates import parse_datetime
+from notify_bot.db import ReportTarget
 from notify_bot.services.bgtoll import (
     BgtollError,
     CloudflareBlockedError,
@@ -50,6 +51,7 @@ from notify_bot.services.sofiatraffic import (
     SofiaTrafficError,
     check_sticker_and_clamp,
 )
+from notify_bot.updates import MissingUpdateFieldError, require
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +92,11 @@ def _days_until(date_str: str | None) -> int | None:
 # ── Retry helper ──────────────────────────────────────────────────────────────
 
 
-async def _retry(
-    coro_fn: Callable[..., Coroutine[Any, Any, Any]],
+async def _retry[T](
+    coro_fn: Callable[..., Coroutine[Any, Any, T]],
     *args: Any,
     skip_on: tuple[Type[BaseException], ...] = (),
-) -> Any:
+) -> T:
     """
     Call ``coro_fn(*args)`` up to ``_RETRY_ATTEMPTS`` times.
 
@@ -122,18 +124,16 @@ async def _retry(
                     exc,
                 )
                 await asyncio.sleep(delay)
-    raise last_exc  # type: ignore[misc]
+    # Only reachable if _RETRY_ATTEMPTS were configured as 0 — nothing was ever tried.
+    raise last_exc or RuntimeError("_retry made no attempts")
 
 
 # ── Per-user report ───────────────────────────────────────────────────────────
 
 
-async def _build_report_message(user: dict) -> str | None:
+async def _build_report_message(user: ReportTarget) -> str | None:
     """
     Run all obligation checks for one user and compose the report text.
-
-    ``user`` must be a dict with keys:
-    ``user_id``, ``first_name``, ``national_id``, ``driving_licence``, ``vehicle_plate``.
 
     Returns ``None`` when there is nothing to report (every check came back
     clean or unavailable) — the "no news is good news" convention used
@@ -320,10 +320,10 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     One-shot job: build and send the daily report for a single user.
 
-    ``context.job.data`` must be a dict with keys:
-    ``user_id``, ``first_name``, ``national_id``, ``driving_licence``, ``vehicle_plate``.
+    ``context.job.data`` must be the :class:`~notify_bot.db.ReportTarget` that
+    ``daily_obligations_report`` scheduled the job with.
     """
-    user: dict = context.job.data  # type: ignore[union-attr]
+    user = cast(ReportTarget, require(context.job, "job").data)
     uid: int = user["user_id"]
     message = await _build_report_message(user)
     if message is None:
@@ -335,7 +335,7 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.warning("Could not deliver daily report to user %s: %s", uid, exc)
 
 
-async def send_user_report_now(context: ContextTypes.DEFAULT_TYPE, user: dict) -> bool:
+async def send_user_report_now(context: ContextTypes.DEFAULT_TYPE, user: ReportTarget) -> bool:
     """
     Build and immediately send one user's report, bypassing the job queue.
 
@@ -364,11 +364,16 @@ async def daily_obligations_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     Spreading users across time avoids hitting rate limits on the MVR and
     sofiatraffic.bg APIs when many users are checked simultaneously.
     """
+    # Not require(): PTB types this property with a free TypeVar (JobQueue[ST]) that
+    # a generic helper can't unify.
+    job_queue = context.job_queue
+    if job_queue is None:
+        raise MissingUpdateFieldError("context has no job_queue")
     users = await db.get_all_approved_with_profiles()
     logger.info("Daily report: scheduling %d user report(s), %ds apart", len(users), _USER_STAGGER)
 
     for i, user in enumerate(users):
-        context.job_queue.run_once(  # type: ignore[union-attr]
+        job_queue.run_once(
             _send_user_report,
             when=i
             * random.randint(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import httpx
 
@@ -27,7 +28,7 @@ _HEADERS = {
 async def get_rates(
     currency: str = "ECU",
     period: str = "7D",
-) -> tuple[list[dict], str]:
+) -> tuple[list[dict[str, Any]], str]:
     """
     Fetch informal exchange rates for a given currency and time period.
 

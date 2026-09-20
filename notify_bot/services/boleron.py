@@ -17,6 +17,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
@@ -187,7 +188,7 @@ async def _get_token() -> str:
     return _token
 
 
-async def _get(path: str, params: dict, *, base: str = _API_BASE) -> dict:
+async def _get(path: str, params: dict[str, Any], *, base: str = _API_BASE) -> dict[str, Any]:
     """GET `base/path` with auto-refreshed bearer auth. Returns parsed JSON."""
     token = await _get_token()
     try:
@@ -206,9 +207,10 @@ async def _get(path: str, params: dict, *, base: str = _API_BASE) -> dict:
         raise BoleronError(f"HTTP {resp.status_code} from {path}")
 
     try:
-        return resp.json()
+        payload: dict[str, Any] = resp.json()
     except Exception as exc:
         raise BoleronError(f"Non-JSON response from {path}") from exc
+    return payload
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

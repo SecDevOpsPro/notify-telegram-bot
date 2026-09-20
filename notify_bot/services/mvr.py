@@ -79,7 +79,7 @@ class MVRApiError(Exception):
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 
-async def _fetch(params: dict[str, str]) -> dict:
+async def _fetch(params: dict[str, str]) -> dict[str, Any]:
     cookies = {**_COOKIES, "EAUSessionID": config.MVR_SESSION_ID}
     async with httpx.AsyncClient(
         timeout=60.0,
@@ -87,10 +87,11 @@ async def _fetch(params: dict[str, str]) -> dict:
     ) as client:
         resp = await client.get(_BASE_URL, params=params, headers=_HEADERS, cookies=cookies)
         resp.raise_for_status()
-        return resp.json()
+        payload: dict[str, Any] = resp.json()
+        return payload
 
 
-def _parse(data: dict) -> list[Obligation]:
+def _parse(data: dict[str, Any]) -> list[Obligation]:
     result: list[Obligation] = []
     for unit in data.get("obligationsData", []):
         ug: int = unit.get("unitGroup", 0)
@@ -167,7 +168,7 @@ async def check_by_plate(national_id: str, plate_number: str) -> list[Obligation
 
 # ── Formatting ────────────────────────────────────────────────────────────────
 
-_OBLIGATIONS_TEMPLATE = Template(
+_OBLIGATIONS_TEMPLATE: Template = Template(
     "{% for unit in units %}\n"
     "<b>{{ unit.unit_group_label }}</b>\n"
     "{% if unit.has_obligations %}"
@@ -244,7 +245,7 @@ def _format_obligation(ob: Any) -> str:
     doc_series = extra.get("documentSeries")
     doc_number = extra.get("documentNumber")
     if doc_series or doc_number:
-        label = _DOCUMENT_TYPE_LABELS.get(extra.get("documentType"), "Document")
+        label = _DOCUMENT_TYPE_LABELS.get(extra.get("documentType") or "", "Document")
         reference = " ".join(part for part in (doc_series, doc_number) if part)
         lines.append(f"📄 {label}: {reference}")
 

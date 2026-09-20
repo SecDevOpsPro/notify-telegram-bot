@@ -37,6 +37,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "mypy>=1.13",
   "pytest>=8",
   "pytest-asyncio>=0.24",
   "pytest-mock>=3.14",
@@ -94,7 +95,9 @@ ignore = []
 python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -50,6 +50,7 @@ from notify_bot.services.sofiatraffic import (
     check_clamp,
     check_sticker,
 )
+from notify_bot.updates import require
 
 logger = logging.getLogger(__name__)
 
@@ -60,26 +61,29 @@ logger = logging.getLogger(__name__)
 @require_approved
 async def driver_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check traffic/document obligations by driving licence number."""
-    uid = update.effective_user.id
+    message = require(update.message, "message")
+    uid = require(update.effective_user, "effective_user").id
     profile = await db.get_profile(uid)
+    national_id = profile.get("national_id") if profile else None
+    licence = profile.get("driving_licence") if profile else None
 
-    if not profile or not profile.get("national_id") or not profile.get("driving_licence"):
-        await update.message.reply_html(
+    if not national_id or not licence:
+        await message.reply_html(
             "⚠️ <b>Missing data.</b>\n\n"
             "Use /enroll to save your National ID and Driving Licence number first."
         )
         return
 
-    await update.message.reply_text("🔍 Checking obligations by driving licence…")
+    await message.reply_text("🔍 Checking obligations by driving licence…")
 
     try:
-        units = await check_by_licence(profile["national_id"], profile["driving_licence"])
+        units = await check_by_licence(national_id, licence)
     except MVRApiError as exc:
         logger.exception("MVR API error for user %s", uid)
-        await update.message.reply_text(f"⚠️ MVR API error: {exc}")
+        await message.reply_text(f"⚠️ MVR API error: {exc}")
         return
 
-    await update.message.reply_html("<b>🔎 Obligations check</b>\n" + render_obligations(units))
+    await message.reply_html("<b>🔎 Obligations check</b>\n" + render_obligations(units))
 
 
 # ── /vignette ─────────────────────────────────────────────────────────────────
@@ -92,7 +96,8 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     Usage: /vignette          — uses the plate stored via /enroll
            /vignette CB1234AB — check an ad-hoc plate
     """
-    uid = update.effective_user.id
+    message = require(update.message, "message")
+    uid = require(update.effective_user, "effective_user").id
 
     # Plate from command arg takes precedence over enrolled plate
     plate: str | None = None
@@ -101,16 +106,16 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if not plate:
         profile = await db.get_profile(uid)
-        plate = (profile or {}).get("vehicle_plate")
+        plate = profile.get("vehicle_plate") if profile else None
 
     if not plate:
-        await update.message.reply_html(
+        await message.reply_html(
             "⚠️ <b>No plate found.</b>\n\n"
             "Use <code>/vignette CB1234AB</code> or save your plate with /enroll."
         )
         return
 
-    await update.message.reply_text(f"🔍 Checking vignette for {plate}…")
+    await message.reply_text(f"🔍 Checking vignette for {plate}…")
 
     try:
         info = await check_vignette(plate)
@@ -122,13 +127,13 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             logger.warning(
                 "Boleron vignette fallback also failed for user %s: %s", uid, boleron_exc
             )
-            await update.message.reply_html(
+            await message.reply_html(
                 "⚠️ <b>Vignette check unavailable.</b>\n\n"
                 'Check manually: <a href="https://check.bgtoll.bg/">check.bgtoll.bg</a>'
             )
             return
         if not bv.found:
-            await update.message.reply_html(
+            await message.reply_html(
                 f"🛣️ <b>Vignette for {plate}</b>\n\n❌ No active vignette found."
             )
             return
@@ -140,13 +145,11 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
         if bv.price:
             lines.append(f"💰 Price: {bv.price}")
-        await update.message.reply_html("\n".join(lines))
+        await message.reply_html("\n".join(lines))
         return
 
     if not info.found:
-        await update.message.reply_html(
-            f"🛣️ <b>Vignette for {plate}</b>\n\n❌ No active vignette found."
-        )
+        await message.reply_html(f"🛣️ <b>Vignette for {plate}</b>\n\n❌ No active vignette found.")
         return
 
     status_icon = "✅" if info.is_valid else "❌"
@@ -158,7 +161,7 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if info.emission_class:
         lines.append(f"🌿 Emission class: {info.emission_class}")
 
-    await update.message.reply_html("\n".join(lines))
+    await message.reply_html("\n".join(lines))
 
 
 # ── /sticker ──────────────────────────────────────────────────────────────────
@@ -171,7 +174,8 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     Usage: /sticker          — uses the plate stored via /enroll
            /sticker CB1234AB — check an ad-hoc plate
     """
-    uid = update.effective_user.id
+    message = require(update.message, "message")
+    uid = require(update.effective_user, "effective_user").id
 
     plate: str | None = None
     if context.args:
@@ -179,21 +183,21 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if not plate:
         profile = await db.get_profile(uid)
-        plate = (profile or {}).get("vehicle_plate")
+        plate = profile.get("vehicle_plate") if profile else None
 
     if not plate:
-        await update.message.reply_html(
+        await message.reply_html(
             "⚠️ <b>No plate found.</b>\n\n"
             "Use <code>/sticker CB1234AB</code> or save your plate with /enroll."
         )
         return
 
-    await update.message.reply_text(f"🔍 Checking parking sticker for {plate}…")
+    await message.reply_text(f"🔍 Checking parking sticker for {plate}…")
 
     try:
         info = await check_sticker(plate)
     except SofiaCloudflareError:
-        await update.message.reply_html(
+        await message.reply_html(
             "⚠️ <b>Cloudflare blocked the request.</b>\n\n"
             "Check manually: "
             '<a href="https://www.sofiatraffic.bg/en/parking">sofiatraffic.bg/parking</a>'
@@ -201,11 +205,11 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     except SofiaTrafficError as exc:
         logger.exception("Sofia Traffic API error for user %s", uid)
-        await update.message.reply_text(f"⚠️ Sofia Traffic service error: {exc}")
+        await message.reply_text(f"⚠️ Sofia Traffic service error: {exc}")
         return
 
     if not info.found:
-        await update.message.reply_html(
+        await message.reply_html(
             f"🅿️ <b>Parking sticker for {plate}</b>\n\n❌ No active parking sticker found."
         )
         return
@@ -222,7 +226,7 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if info.sticker_type:
         lines.append(f"📋 Type: {info.sticker_type}")
 
-    await update.message.reply_html("\n".join(lines))
+    await message.reply_html("\n".join(lines))
 
 
 # ── /clamp ────────────────────────────────────────────────────────────────────
@@ -235,7 +239,8 @@ async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     Usage: /clamp          — uses the plate stored via /enroll
            /clamp CB1234AB — check an ad-hoc plate
     """
-    uid = update.effective_user.id
+    message = require(update.message, "message")
+    uid = require(update.effective_user, "effective_user").id
 
     plate: str | None = None
     if context.args:
@@ -243,21 +248,21 @@ async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if not plate:
         profile = await db.get_profile(uid)
-        plate = (profile or {}).get("vehicle_plate")
+        plate = profile.get("vehicle_plate") if profile else None
 
     if not plate:
-        await update.message.reply_html(
+        await message.reply_html(
             "⚠️ <b>No plate found.</b>\n\n"
             "Use <code>/clamp CB1234AB</code> or save your plate with /enroll."
         )
         return
 
-    await update.message.reply_text(f"🔍 Checking wheel-clamp status for {plate}…")
+    await message.reply_text(f"🔍 Checking wheel-clamp status for {plate}…")
 
     try:
         info = await check_clamp(plate)
     except SofiaCloudflareError:
-        await update.message.reply_html(
+        await message.reply_html(
             "⚠️ <b>Cloudflare blocked the request.</b>\n\n"
             "Check manually: "
             '<a href="https://www.sofiatraffic.bg/en/parking">sofiatraffic.bg/parking</a>'
@@ -265,11 +270,11 @@ async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     except SofiaTrafficError as exc:
         logger.exception("Sofia Traffic API error for user %s", uid)
-        await update.message.reply_text(f"⚠️ Sofia Traffic service error: {exc}")
+        await message.reply_text(f"⚠️ Sofia Traffic service error: {exc}")
         return
 
     if not info.found or not info.clamped:
-        await update.message.reply_html(
+        await message.reply_html(
             f"🔓 <b>Wheel clamp for {plate}</b>\n\n✅ Vehicle is <b>not</b> wheel-clamped."
         )
         return
@@ -283,32 +288,35 @@ async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         lines.append(f"ℹ️ {info.release_instructions}")
     lines.append('\n<a href="https://www.sofiatraffic.bg/en/parking">sofiatraffic.bg/parking</a>')
 
-    await update.message.reply_html("\n".join(lines))
+    await message.reply_html("\n".join(lines))
 
 
 @require_approved
 async def plate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check traffic/document obligations by vehicle plate number."""
-    uid = update.effective_user.id
+    message = require(update.message, "message")
+    uid = require(update.effective_user, "effective_user").id
     profile = await db.get_profile(uid)
+    national_id = profile.get("national_id") if profile else None
+    plate = profile.get("vehicle_plate") if profile else None
 
-    if not profile or not profile.get("national_id") or not profile.get("vehicle_plate"):
-        await update.message.reply_html(
+    if not national_id or not plate:
+        await message.reply_html(
             "⚠️ <b>Missing data.</b>\n\n"
             "Use /enroll to save your National ID and Vehicle Plate first."
         )
         return
 
-    await update.message.reply_text("🔍 Checking obligations by vehicle plate…")
+    await message.reply_text("🔍 Checking obligations by vehicle plate…")
 
     try:
-        units = await check_by_plate(profile["national_id"], profile["vehicle_plate"])
+        units = await check_by_plate(national_id, plate)
     except MVRApiError as exc:
         logger.exception("MVR API error for user %s", uid)
-        await update.message.reply_text(f"⚠️ MVR API error: {exc}")
+        await message.reply_text(f"⚠️ MVR API error: {exc}")
         return
 
-    await update.message.reply_html("<b>🔎 Obligations check</b>\n" + render_obligations(units))
+    await message.reply_html("<b>🔎 Obligations check</b>\n" + render_obligations(units))
 
 
 # ── /gtp ──────────────────────────────────────────────────────────────────────
@@ -321,7 +329,8 @@ async def gtp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     Usage: /gtp          — uses the plate stored via /enroll
            /gtp CB1234AB — check an ad-hoc plate
     """
-    uid = update.effective_user.id
+    message = require(update.message, "message")
+    uid = require(update.effective_user, "effective_user").id
 
     plate: str | None = None
     if context.args:
@@ -329,31 +338,31 @@ async def gtp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if not plate:
         profile = await db.get_profile(uid)
-        plate = (profile or {}).get("vehicle_plate")
+        plate = profile.get("vehicle_plate") if profile else None
 
     if not plate:
-        await update.message.reply_html(
+        await message.reply_html(
             "⚠️ <b>No plate found.</b>\n\n"
             "Use <code>/gtp CB1234AB</code> or save your plate with /enroll."
         )
         return
 
-    await update.message.reply_text(f"🔍 Checking technical inspection for {plate}…")
+    await message.reply_text(f"🔍 Checking technical inspection for {plate}…")
 
     try:
         info = await check_gtp(plate)
     except BoleronError as exc:
         logger.exception("Boleron GTP error for user %s", uid)
-        await update.message.reply_text(f"⚠️ Service error: {exc}")
+        await message.reply_text(f"⚠️ Service error: {exc}")
         return
 
     if not info.found:
-        await update.message.reply_html(
+        await message.reply_html(
             f"🔧 <b>Technical Inspection for {plate}</b>\n\n❌ No valid inspection found."
         )
         return
 
-    await update.message.reply_html(
+    await message.reply_html(
         f"🔧 <b>Technical Inspection for {plate}</b>\n✅ Valid until: <b>{info.valid_to}</b>"
     )
 
@@ -368,7 +377,8 @@ async def mtpl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     Usage: /mtpl          — uses the plate stored via /enroll
            /mtpl CB1234AB — check an ad-hoc plate
     """
-    uid = update.effective_user.id
+    message = require(update.message, "message")
+    uid = require(update.effective_user, "effective_user").id
 
     plate: str | None = None
     if context.args:
@@ -376,22 +386,22 @@ async def mtpl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     if not plate:
         profile = await db.get_profile(uid)
-        plate = (profile or {}).get("vehicle_plate")
+        plate = profile.get("vehicle_plate") if profile else None
 
     if not plate:
-        await update.message.reply_html(
+        await message.reply_html(
             "⚠️ <b>No plate found.</b>\n\n"
             "Use <code>/mtpl CB1234AB</code> or save your plate with /enroll."
         )
         return
 
-    await update.message.reply_text(f"🔍 Checking civil liability insurance for {plate}…")
+    await message.reply_text(f"🔍 Checking civil liability insurance for {plate}…")
 
     try:
         info = await check_mtpl(plate)
     except BoleronError as exc:
         logger.exception("Boleron MTPL error for user %s", uid)
-        await update.message.reply_text(f"⚠️ Service error: {exc}")
+        await message.reply_text(f"⚠️ Service error: {exc}")
         return
 
     status_icon = "✅" if info.active else "❌"
@@ -404,7 +414,7 @@ async def mtpl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if info.valid_from and info.valid_to:
         lines.append(f"📅 Valid from: {info.valid_from} to {info.valid_to}")
 
-    await update.message.reply_html("\n".join(lines))
+    await message.reply_html("\n".join(lines))
 
 
 # ── /fines ────────────────────────────────────────────────────────────────────
@@ -413,29 +423,30 @@ async def mtpl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 @require_approved
 async def fines_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check traffic fines (КАТ) via boleron.bg using stored EGN + driving licence."""
-    uid = update.effective_user.id
+    message = require(update.message, "message")
+    uid = require(update.effective_user, "effective_user").id
     profile = await db.get_profile(uid)
+    national_id = profile.get("national_id") if profile else None
+    licence = profile.get("driving_licence") if profile else None
 
-    if not profile or not profile.get("national_id") or not profile.get("driving_licence"):
-        await update.message.reply_html(
+    if not national_id or not licence:
+        await message.reply_html(
             "⚠️ <b>Missing data.</b>\n\n"
             "Use /enroll to save your National ID and Driving Licence first."
         )
         return
 
-    await update.message.reply_text("🔍 Checking traffic fines…")
+    await message.reply_text("🔍 Checking traffic fines…")
 
     try:
-        result = await check_fines(profile["driving_licence"], profile["national_id"])
+        result = await check_fines(licence, national_id)
     except BoleronError as exc:
         logger.exception("Boleron fines error for user %s", uid)
-        await update.message.reply_text(f"⚠️ Service error: {exc}")
+        await message.reply_text(f"⚠️ Service error: {exc}")
         return
 
     if not result.has_fines:
-        await update.message.reply_html(
-            "🚔 <b>Traffic Fines</b>\n\n✅ No unpaid traffic fines found."
-        )
+        await message.reply_html("🚔 <b>Traffic Fines</b>\n\n✅ No unpaid traffic fines found.")
         return
 
     sym = result.currency_symbol
@@ -452,30 +463,31 @@ async def fines_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     lines.append(
         '\n<a href="https://www.boleron.bg/en/fine-check-result/">Pay online at boleron.bg</a>'
     )
-    await update.message.reply_html("\n".join(lines))
+    await message.reply_html("\n".join(lines))
 
 
 @require_approved
 async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show vehicle registration data using stored plate + talon number."""
-    uid = update.effective_user.id
+    message = require(update.message, "message")
+    uid = require(update.effective_user, "effective_user").id
     profile = await db.get_profile(uid)
+    plate = profile.get("vehicle_plate") if profile else None
+    talon = profile.get("talon_no") if profile else None
 
-    if not profile or not profile.get("vehicle_plate") or not profile.get("talon_no"):
-        await update.message.reply_html(
+    if not plate or not talon:
+        await message.reply_html(
             "⚠️ <b>Missing data.</b>\n\n"
             "Use /enroll to save your vehicle plate and talon number first."
         )
         return
 
-    await update.message.reply_text("🔍 Looking up vehicle data…")
+    await message.reply_text("🔍 Looking up vehicle data…")
 
     try:
-        v: VehicleData = await check_vehicle_data(profile["vehicle_plate"], profile["talon_no"])
+        v: VehicleData = await check_vehicle_data(plate, talon)
     except BoleronNotFoundError:
-        plate = profile["vehicle_plate"]
-        talon = profile["talon_no"]
-        await update.message.reply_html(
+        await message.reply_html(
             "⚠️ <b>Vehicle not found.</b>\n\n"
             f"No data found for plate <code>{plate}</code> / talon <code>{talon}</code> "
             "in the boleron.bg database.\n\n"
@@ -484,7 +496,7 @@ async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     except BoleronError as exc:
         logger.warning("Boleron vehicleDataServices error for user %s: %s", uid, exc)
-        await update.message.reply_text(f"⚠️ Service error: {exc}")
+        await message.reply_text(f"⚠️ Service error: {exc}")
         return
 
     lines = [
@@ -509,4 +521,4 @@ async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if v.leasing:
         lines.append("🏦 Leasing vehicle")
 
-    await update.message.reply_html("\n".join(lines))
+    await message.reply_html("\n".join(lines))

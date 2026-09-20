@@ -78,6 +78,13 @@ wired up in `run_bot.py`.
   dereferencing them directly or adding `# type: ignore`. DB rows are
   `TypedDict`s (`db.UserRow`, `db.ProfileRow`, `db.ReportTarget`), not bare
   `dict`s; use `HandlerCallback[T]` to annotate decorators that wrap handlers.
+- **Service API shape.** A `services/` function taking two same-typed
+  credential strings (EGN vs licence number, plate vs talon) takes them
+  keyword-only (`def check_fines(*, driver_licence_no, egn)`) — a swap is
+  invisible to mypy otherwise, and the argument order differs between APIs.
+  Result dataclasses are `frozen=True, slots=True`; keep raw API entries
+  (`mvr.RawObligation`) and display strings (`mvr._RenderedGroup`) as
+  separate types.
 - **Config is env-var only**, centralized in `config.py` — don't read
   `os.environ` directly from handlers/services.
 - Secrets (`.sops.yaml` present) are managed with `sops`/`age`; never

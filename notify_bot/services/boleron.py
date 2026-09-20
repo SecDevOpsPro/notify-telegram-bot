@@ -237,7 +237,7 @@ def _clean_date(value: str | None) -> str | None:
 # ── Data classes ──────────────────────────────────────────────────────────────
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class GtpInfo:
     """Technical inspection (ГТП) result."""
 
@@ -245,7 +245,7 @@ class GtpInfo:
     valid_to: str | None = None  # formatted, e.g. "08.04.2026"
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class MtplInfo:
     """Motor Third Party Liability (Гражданска отговорност) result."""
 
@@ -255,7 +255,7 @@ class MtplInfo:
     valid_to: str | None = None
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class BoleronVignetteInfo:
     """Vignette result from boleron.bg API."""
 
@@ -268,7 +268,7 @@ class BoleronVignetteInfo:
     validity_type: str | None = None
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class FineDetail:
     """A single fine entry."""
 
@@ -279,7 +279,7 @@ class FineDetail:
     is_served: bool = False
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class VehicleData:
     """Vehicle registration data from vehicleDataServices."""
 
@@ -300,7 +300,7 @@ class VehicleData:
     leasing: bool = False
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class FinesResult:
     """Traffic fines check result."""
 
@@ -356,7 +356,7 @@ async def check_vignette_boleron(car_no: str) -> BoleronVignetteInfo:
     )
 
 
-async def check_vehicle_data(car_no: str, talon_no: str) -> VehicleData:
+async def check_vehicle_data(*, car_no: str, talon_no: str) -> VehicleData:
     """Fetch vehicle registration data using plate + talon (small registration card) number."""
     data = await _get(
         "vehicleDataServices",
@@ -382,7 +382,7 @@ async def check_vehicle_data(car_no: str, talon_no: str) -> VehicleData:
     )
 
 
-async def check_fines(driver_licence_no: str, egn: str) -> FinesResult:
+async def check_fines(*, driver_licence_no: str, egn: str) -> FinesResult:
     """Check traffic fines for the given driver licence + EGN."""
     data = await _get("fines", {"driverLicenseNo": driver_licence_no, "egn": egn})
     count: int = int(data.get("countFines", 0))

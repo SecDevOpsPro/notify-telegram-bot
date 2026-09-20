@@ -96,9 +96,10 @@ async def _retry[T](
     coro_fn: Callable[..., Coroutine[Any, Any, T]],
     *args: Any,
     skip_on: tuple[Type[BaseException], ...] = (),
+    **kwargs: Any,
 ) -> T:
     """
-    Call ``coro_fn(*args)`` up to ``_RETRY_ATTEMPTS`` times.
+    Call ``coro_fn(*args, **kwargs)`` up to ``_RETRY_ATTEMPTS`` times.
 
     Exceptions listed in ``skip_on`` are re-raised immediately without retry
     (used for Cloudflare challenges that won't resolve with a retry).
@@ -108,7 +109,7 @@ async def _retry[T](
     last_exc: BaseException | None = None
     for attempt in range(_RETRY_ATTEMPTS):
         try:
-            return await coro_fn(*args)
+            return await coro_fn(*args, **kwargs)
         except skip_on:
             raise
         except Exception as exc:
@@ -149,7 +150,7 @@ async def _build_report_message(user: ReportTarget) -> str | None:
 
     if national_id and licence:
         try:
-            units = await _retry(check_by_licence, national_id, licence)
+            units = await _retry(check_by_licence, national_id=national_id, licence_number=licence)
             sections.append("🪪 <b>By driving licence:</b>\n" + render_obligations(units))
         except MVRApiError as exc:
             logger.warning("Licence check failed for user %s: %s", uid, exc)
@@ -159,7 +160,7 @@ async def _build_report_message(user: ReportTarget) -> str | None:
 
     if national_id and plate:
         try:
-            units = await _retry(check_by_plate, national_id, plate)
+            units = await _retry(check_by_plate, national_id=national_id, plate_number=plate)
             sections.append("🚗 <b>By vehicle plate (MVR):</b>\n" + render_obligations(units))
         except MVRApiError as exc:
             logger.warning("Plate check failed for user %s: %s", uid, exc)
@@ -296,7 +297,7 @@ async def _build_report_message(user: ReportTarget) -> str | None:
     if national_id and licence:
         await asyncio.sleep(_INTER_CHECK_DELAY)
         try:
-            fines = await _retry(check_fines, licence, national_id)
+            fines = await _retry(check_fines, driver_licence_no=licence, egn=national_id)
             if fines.has_fines:
                 sym = fines.currency_symbol
                 fines_lines = [

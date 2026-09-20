@@ -77,7 +77,7 @@ async def driver_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await message.reply_text("🔍 Checking obligations by driving licence…")
 
     try:
-        units = await check_by_licence(national_id, licence)
+        units = await check_by_licence(national_id=national_id, licence_number=licence)
     except MVRApiError as exc:
         logger.exception("MVR API error for user %s", uid)
         await message.reply_text(f"⚠️ MVR API error: {exc}")
@@ -310,7 +310,7 @@ async def plate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await message.reply_text("🔍 Checking obligations by vehicle plate…")
 
     try:
-        units = await check_by_plate(national_id, plate)
+        units = await check_by_plate(national_id=national_id, plate_number=plate)
     except MVRApiError as exc:
         logger.exception("MVR API error for user %s", uid)
         await message.reply_text(f"⚠️ MVR API error: {exc}")
@@ -439,7 +439,7 @@ async def fines_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await message.reply_text("🔍 Checking traffic fines…")
 
     try:
-        result = await check_fines(licence, national_id)
+        result = await check_fines(driver_licence_no=licence, egn=national_id)
     except BoleronError as exc:
         logger.exception("Boleron fines error for user %s", uid)
         await message.reply_text(f"⚠️ Service error: {exc}")
@@ -485,7 +485,7 @@ async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await message.reply_text("🔍 Looking up vehicle data…")
 
     try:
-        v: VehicleData = await check_vehicle_data(plate, talon)
+        v: VehicleData = await check_vehicle_data(car_no=plate, talon_no=talon)
     except BoleronNotFoundError:
         await message.reply_html(
             "⚠️ <b>Vehicle not found.</b>\n\n"

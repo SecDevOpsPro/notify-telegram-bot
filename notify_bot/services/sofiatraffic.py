@@ -112,7 +112,7 @@ def _coerce_bool(value: object) -> bool | None:
 # ── Data classes ──────────────────────────────────────────────────────────────
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class StickerInfo:
     """
     Parking e-vignette sticker data returned by the API.
@@ -143,7 +143,7 @@ class StickerInfo:
         return s in {"VALID", "ACTIVE", "OK", "ACTIVE_STICKER"} or (self.found and not self.status)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ClampInfo:
     """
     Wheel-clamp status data returned by the API.

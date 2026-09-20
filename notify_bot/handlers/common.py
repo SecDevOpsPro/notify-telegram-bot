@@ -100,7 +100,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             format_error(user.id, "⚠️ Something went wrong. Please try again.", exc)
         )
         return
-    status = record["status"] if record else "unknown"
+    status: menu.PhaseStatus = record["status"] if record else "unknown"
     reply_markup = None
 
     if status == "approved":

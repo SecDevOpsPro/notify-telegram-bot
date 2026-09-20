@@ -19,7 +19,7 @@ it's wired as an extra entry point on that handler instead (see enroll.py).
 from __future__ import annotations
 
 import logging
-from typing import TypedDict, cast
+from typing import Literal, TypedDict, cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
@@ -32,10 +32,14 @@ logger = logging.getLogger(__name__)
 _NOOP = "noop"
 
 
+#: A user's DB status, or ``"unknown"`` for someone the bot has never seen.
+type PhaseStatus = db.UserStatus | Literal["unknown"]
+
+
 class MenuPhase(TypedDict):
     """Where the caller stands — decides which /help buttons they get."""
 
-    status: str
+    status: PhaseStatus
     is_approved: bool
     has_profile: bool
     is_admin: bool
@@ -88,7 +92,7 @@ def _dispatch_table() -> dict[str, HandlerCallback[None]]:
 async def get_user_phase(user_id: int) -> MenuPhase:
     """Resolve the caller's phase: approval status, enrollment, admin-ness."""
     record = await db.get_user(user_id)
-    status = record["status"] if record else "unknown"
+    status: PhaseStatus = record["status"] if record else "unknown"
     is_approved = status == "approved"
 
     has_profile = False

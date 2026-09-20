@@ -83,7 +83,7 @@ def _coerce_bool(value: object) -> bool | None:
 # ── Data class ────────────────────────────────────────────────────────────────
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class VignetteInfo:
     """
     Vignette data returned by the API.

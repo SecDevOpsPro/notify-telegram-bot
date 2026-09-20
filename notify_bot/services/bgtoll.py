@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 import httpx
 
@@ -82,7 +83,7 @@ def _coerce_bool(value: object) -> bool | None:
 # ── Data class ────────────────────────────────────────────────────────────────
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class VignetteInfo:
     """
     Vignette data returned by the API.
@@ -106,7 +107,7 @@ class VignetteInfo:
     status_boolean: bool | None = None
 
     # Raw payload for forward-compatibility
-    raw: dict = field(default_factory=dict, compare=False, repr=False)
+    raw: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
     @property
     def is_valid(self) -> bool:
@@ -166,7 +167,7 @@ def format_validity_period(valid_from: str | None, valid_to: str | None) -> list
     return [line]
 
 
-def _parse(plate: str, country: str, data: dict) -> VignetteInfo:
+def _parse(plate: str, country: str, data: dict[str, Any]) -> VignetteInfo:
     """
     Parse the bgtoll.bg API response into a :class:`VignetteInfo`.
 
@@ -179,7 +180,7 @@ def _parse(plate: str, country: str, data: dict) -> VignetteInfo:
     if "vignette" in data and data["vignette"] is None:
         return VignetteInfo(plate=plate, country=country, found=False, raw=data)
 
-    payload: dict = data.get("vignette") or data.get("vignetteData") or data
+    payload: dict[str, Any] = data.get("vignette") or data.get("vignetteData") or data
 
     if not payload:
         return VignetteInfo(plate=plate, country=country, found=False, raw=data)

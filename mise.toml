@@ -27,6 +27,11 @@ description = "Run the test suite"
 alias = "pytest"
 run = ["uv run pytest tests/"]
 
+[tasks.typecheck]
+description = "Run the type checker"
+alias = "mypy"
+run = ["uv run mypy notify_bot"]
+
 [tasks.format]
 description = "Run the formatter"
 alias = "f"

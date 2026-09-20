@@ -77,6 +77,13 @@ async def test_retry_returns_on_first_success():
 
 
 @pytest.mark.asyncio
+async def test_retry_forwards_positional_and_keyword_arguments():
+    coro_fn = AsyncMock(return_value="ok")
+    assert await _retry(coro_fn, "a", national_id="1", licence_number="2") == "ok"
+    coro_fn.assert_awaited_once_with("a", national_id="1", licence_number="2")
+
+
+@pytest.mark.asyncio
 async def test_retry_recovers_after_transient_failures():
     coro_fn = AsyncMock(side_effect=[ValueError("boom"), ValueError("boom"), "ok"])
     with patch("asyncio.sleep", AsyncMock(return_value=None)):

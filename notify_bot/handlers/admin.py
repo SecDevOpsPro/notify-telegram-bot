@@ -18,7 +18,6 @@ from __future__ import annotations
 import functools
 import html
 import logging
-from typing import Awaitable, Callable
 
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -27,6 +26,7 @@ from telegram.ext import ContextTypes
 from notify_bot import config, db
 from notify_bot.errors import format_error
 from notify_bot.scheduler.jobs import send_user_report_now
+from notify_bot.updates import HandlerCallback, require
 
 logger = logging.getLogger(__name__)
 
@@ -47,16 +47,14 @@ def _is_admin(user_id: int) -> bool:
     return config.is_admin(user_id)
 
 
-_Handler = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
-
-
-def admin(handler: _Handler) -> _Handler:
+def admin(handler: HandlerCallback[None]) -> HandlerCallback[None]:
     """Reject non-admins with a standard message before running *handler*."""
 
     @functools.wraps(handler)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not _is_admin(update.effective_user.id):
-            await update.message.reply_text(_NOT_AUTHORISED_MSG)
+        user = require(update.effective_user, "effective_user")
+        if not _is_admin(user.id):
+            await require(update.message, "message").reply_text(_NOT_AUTHORISED_MSG)
             return
         await handler(update, context)
 
@@ -82,71 +80,74 @@ async def _notify_user(
 @admin
 async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/approve <user_id>"""
+    message = require(update.message, "message")
+    caller = require(update.effective_user, "effective_user")
     if not context.args:
-        await update.message.reply_text("Usage: /approve <user_id>")
+        await message.reply_text("Usage: /approve <user_id>")
         return
 
     try:
         target_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("❌ Invalid user ID.")
+        await message.reply_text("❌ Invalid user ID.")
         return
 
     try:
         await db.set_user_status(target_id, "approved")
     except Exception as exc:
         logger.exception("Failed to approve user_id=%s", target_id)
-        await update.message.reply_html(
+        await message.reply_html(
             format_error(
-                update.effective_user.id,
+                caller.id,
                 "⚠️ Something went wrong while approving that user.",
                 exc,
             )
         )
         return
 
-    await update.message.reply_text(
-        f"✅ User <code>{target_id}</code> approved.", parse_mode="HTML"
-    )
+    await message.reply_text(f"✅ User <code>{target_id}</code> approved.", parse_mode="HTML")
     await _notify_user(context, target_id, _APPROVED_MSG, reply_markup=_ENROLL_KEYBOARD)
 
 
 @admin
 async def deny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/deny <user_id>"""
+    message = require(update.message, "message")
+    caller = require(update.effective_user, "effective_user")
     if not context.args:
-        await update.message.reply_text("Usage: /deny <user_id>")
+        await message.reply_text("Usage: /deny <user_id>")
         return
 
     try:
         target_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("❌ Invalid user ID.")
+        await message.reply_text("❌ Invalid user ID.")
         return
 
     try:
         await db.set_user_status(target_id, "denied")
     except Exception as exc:
         logger.exception("Failed to deny user_id=%s", target_id)
-        await update.message.reply_html(
+        await message.reply_html(
             format_error(
-                update.effective_user.id,
+                caller.id,
                 "⚠️ Something went wrong while denying that user.",
                 exc,
             )
         )
         return
 
-    await update.message.reply_text(f"❌ User <code>{target_id}</code> denied.", parse_mode="HTML")
+    await message.reply_text(f"❌ User <code>{target_id}</code> denied.", parse_mode="HTML")
     await _notify_user(context, target_id, "❌ Your access request was denied.")
 
 
 @admin
 async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/pending — list users awaiting approval."""
+    message = require(update.message, "message")
     users = await db.list_users_by_status("pending")
     if not users:
-        await update.message.reply_text("No pending access requests.")
+        await message.reply_text("No pending access requests.")
         return
 
     lines = [
@@ -154,7 +155,7 @@ async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         f"(@{html.escape(u.get('username') or 'N/A')}) — <code>{u['user_id']}</code>"
         for u in users
     ]
-    await update.message.reply_html(
+    await message.reply_html(
         "⏳ <b>Pending requests</b> (/approve &lt;id&gt; to approve):\n\n" + "\n".join(lines)
     )
 
@@ -162,9 +163,10 @@ async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 @admin
 async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/users — list all approved users."""
+    message = require(update.message, "message")
     users = await db.list_users_by_status("approved")
     if not users:
-        await update.message.reply_text("No approved users yet.")
+        await message.reply_text("No approved users yet.")
         return
 
     lines = [
@@ -172,43 +174,45 @@ async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"(@{html.escape(u.get('username') or 'N/A')}) — <code>{u['user_id']}</code>"
         for u in users
     ]
-    await update.message.reply_html("✅ <b>Approved users:</b>\n\n" + "\n".join(lines))
+    await message.reply_html("✅ <b>Approved users:</b>\n\n" + "\n".join(lines))
 
 
 @admin
 async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/debug <user_id> — grant a user admin-level verbose error detail."""
+    message = require(update.message, "message")
     if not context.args:
-        await update.message.reply_text("Usage: /debug <user_id>")
+        await message.reply_text("Usage: /debug <user_id>")
         return
 
     try:
         target_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("❌ Invalid user ID.")
+        await message.reply_text("❌ Invalid user ID.")
         return
 
     config.add_debug_user(target_id)
-    await update.message.reply_text(f"🐛 User {target_id} now gets verbose error detail.")
+    await message.reply_text(f"🐛 User {target_id} now gets verbose error detail.")
 
 
 @admin
 async def undebug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/undebug <user_id> — revoke verbose error detail from a user."""
+    message = require(update.message, "message")
     if not context.args:
-        await update.message.reply_text("Usage: /undebug <user_id>")
+        await message.reply_text("Usage: /undebug <user_id>")
         return
 
     try:
         target_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("❌ Invalid user ID.")
+        await message.reply_text("❌ Invalid user ID.")
         return
 
     if config.remove_debug_user(target_id):
-        await update.message.reply_text(f"🐛 User {target_id} no longer gets verbose error detail.")
+        await message.reply_text(f"🐛 User {target_id} no longer gets verbose error detail.")
     else:
-        await update.message.reply_text(f"ℹ️ User {target_id} wasn't in the debug list.")
+        await message.reply_text(f"ℹ️ User {target_id} wasn't in the debug list.")
 
 
 @admin
@@ -220,23 +224,25 @@ async def brief_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     (``send_user_report_now``), so results match what that user would get
     at the scheduled report time — minus the inter-user stagger.
     """
+    message = require(update.message, "message")
+    caller = require(update.effective_user, "effective_user")
     if context.args:
         try:
             target_id = int(context.args[0])
         except ValueError:
-            await update.message.reply_text("❌ Invalid user ID.")
+            await message.reply_text("❌ Invalid user ID.")
             return
     else:
-        target_id = update.effective_user.id
+        target_id = caller.id
 
     try:
         user = await db.get_user(target_id)
         profile = await db.get_profile(target_id)
     except Exception as exc:
         logger.exception("Failed to load user/profile for user_id=%s", target_id)
-        await update.message.reply_html(
+        await message.reply_html(
             format_error(
-                update.effective_user.id,
+                caller.id,
                 "⚠️ Something went wrong while loading that user's data.",
                 exc,
             )
@@ -244,15 +250,15 @@ async def brief_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if not user or user["status"] != "approved":
-        await update.message.reply_text("❌ That user is not approved.")
+        await message.reply_text("❌ That user is not approved.")
         return
     if not profile or not (
         profile.get("national_id") or profile.get("driving_licence") or profile.get("vehicle_plate")
     ):
-        await update.message.reply_text("❌ That user has no profile data saved.")
+        await message.reply_text("❌ That user has no profile data saved.")
         return
 
-    data = {
+    data: db.ReportTarget = {
         "user_id": target_id,
         "first_name": user.get("first_name"),
         "national_id": profile.get("national_id"),
@@ -260,16 +266,14 @@ async def brief_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "vehicle_plate": profile.get("vehicle_plate"),
     }
 
-    await update.message.reply_text(
-        f"⏳ Running report for <code>{target_id}</code>…", parse_mode="HTML"
-    )
+    await message.reply_text(f"⏳ Running report for <code>{target_id}</code>…", parse_mode="HTML")
     try:
         sent = await send_user_report_now(context, data)
     except Exception as exc:
         logger.exception("Failed to run report for user_id=%s", target_id)
-        await update.message.reply_html(
+        await message.reply_html(
             format_error(
-                update.effective_user.id,
+                caller.id,
                 "⚠️ Something went wrong while running that report.",
                 exc,
             )
@@ -277,11 +281,9 @@ async def brief_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if sent:
-        await update.message.reply_text(
-            f"✅ Report sent to <code>{target_id}</code>.", parse_mode="HTML"
-        )
+        await message.reply_text(f"✅ Report sent to <code>{target_id}</code>.", parse_mode="HTML")
     else:
-        await update.message.reply_text(
+        await message.reply_text(
             f"ℹ️ Nothing to report for <code>{target_id}</code> right now.", parse_mode="HTML"
         )
 
@@ -289,15 +291,16 @@ async def brief_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 @admin
 async def myip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/myip — show the public IP of the host running the bot."""
+    message = require(update.message, "message")
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get("https://api.ipify.org")
             resp.raise_for_status()
             ip = resp.text.strip()
-        await update.message.reply_text(f"🌐 Public IP: <code>{ip}</code>", parse_mode="HTML")
+        await message.reply_text(f"🌐 Public IP: <code>{ip}</code>", parse_mode="HTML")
     except Exception as exc:
         logger.warning("Failed to fetch public IP: %s", exc)
-        await update.message.reply_text("⚠️ Could not determine public IP.")
+        await message.reply_text("⚠️ Could not determine public IP.")
 
 
 # ── Inline callback ───────────────────────────────────────────────────────────
@@ -305,17 +308,18 @@ async def myip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the Approve / Deny inline buttons from access-request notifications."""
-    query = update.callback_query
+    query = require(update.callback_query, "callback_query")
     await query.answer()
 
-    if not _is_admin(update.effective_user.id):
+    caller = require(update.effective_user, "effective_user")
+    if not _is_admin(caller.id):
         await query.edit_message_text(_NOT_AUTHORISED_MSG)
         return
 
     try:
-        action, target_id_str = query.data.split(":", 1)
+        action, target_id_str = (query.data or "").split(":", 1)
         target_id = int(target_id_str)
-    except (ValueError, AttributeError):
+    except ValueError:
         await query.edit_message_text("⚠️ Malformed callback data.")
         return
 
@@ -326,7 +330,7 @@ async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         logger.exception("Failed to set status via callback for user_id=%s", target_id)
         await query.edit_message_text(
             format_error(
-                update.effective_user.id,
+                caller.id,
                 "⚠️ Something went wrong processing that action.",
                 exc,
             ),

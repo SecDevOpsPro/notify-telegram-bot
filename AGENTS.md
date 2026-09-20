@@ -27,9 +27,10 @@ uv run python -m notify_bot.run_bot  # run the bot (needs TOKEN, ADMIN_TELEGRAM_
 uv run pytest tests/                 # run tests
 uv run ruff format .                 # format
 uv run ruff check .                  # lint
+uv run mypy notify_bot               # type-check
 ```
 
-Equivalent `mise` tasks exist: `mise run tests`, `mise run format`.
+Equivalent `mise` tasks exist: `mise run tests`, `mise run format`, `mise run typecheck`.
 
 Required env vars for local runs: `TOKEN`, `ADMIN_TELEGRAM_ID`. See
 `notify_bot/config.py` for the full list (all config is env-var driven,
@@ -45,6 +46,7 @@ notify_bot/
   db.py            async SQLite layer, single shared connection
   errors.py        format_error() — verbose detail for admin/debug users only
   middlewares.py   @require_approved decorator
+  updates.py       require() to narrow PTB's optional Update fields; HandlerCallback type
   handlers/        one module per command group
   services/        one module per external API (mvr, bgtoll, sofiatraffic, cambiocuba, boleron)
   scheduler/       daily report job
@@ -69,6 +71,20 @@ wired up in `run_bot.py`.
 - **Access control.** Commands that touch user data go through
   `@require_approved` (`middlewares.py`). Public commands (`/start`,
   `/help`, `/request`, `/change`) intentionally skip it.
+- **Typed handlers.** `mypy notify_bot` must stay clean. PTB types
+  `update.message`, `update.effective_user`, `update.callback_query` and
+  `context.user_data` as optional — narrow them once at the top of a handler
+  with `require(update.message, "message")` (`updates.py`) rather than
+  dereferencing them directly or adding `# type: ignore`. DB rows are
+  `TypedDict`s (`db.UserRow`, `db.ProfileRow`, `db.ReportTarget`), not bare
+  `dict`s; use `HandlerCallback[T]` to annotate decorators that wrap handlers.
+- **Service API shape.** A `services/` function taking two same-typed
+  credential strings (EGN vs licence number, plate vs talon) takes them
+  keyword-only (`def check_fines(*, driver_licence_no, egn)`) — a swap is
+  invisible to mypy otherwise, and the argument order differs between APIs.
+  Result dataclasses are `frozen=True, slots=True`; keep raw API entries
+  (`mvr.RawObligation`) and display strings (`mvr._RenderedGroup`) as
+  separate types.
 - **Config is env-var only**, centralized in `config.py` — don't read
   `os.environ` directly from handlers/services.
 - Secrets (`.sops.yaml` present) are managed with `sops`/`age`; never
@@ -88,7 +104,7 @@ wired up in `run_bot.py`.
 
 - CI (`.github/workflows/pr-tests.yaml`) builds the package with `uv build`
   and runs `pytest tests/` on every PR to `main`. Keep changes passing
-  `ruff check .` and the test suite.
+  `ruff check .` and the test suite (and, ideally, `mypy notify_bot`).
 - Dependencies are pinned in `pyproject.toml`/`uv.lock` and kept current by
   Renovate (`renovate.json5`) — avoid hand-editing version pins unless
   necessary.

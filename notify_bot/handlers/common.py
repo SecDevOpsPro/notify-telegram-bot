@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes
 from notify_bot import config, db
 from notify_bot.errors import format_error
 from notify_bot.handlers import menu
+from notify_bot.updates import require
 
 logger = logging.getLogger(__name__)
 
@@ -76,15 +77,17 @@ async def list_commands_command(update: Update, context: ContextTypes.DEFAULT_TY
     """Show the full static command reference (every command, regardless of
     phase) — reused by "/help list-commands" and the "📜 All commands" button."""
     user = update.effective_user
-    if not user:
+    message = update.effective_message
+    if not user or not message:
         return
-    await update.effective_message.reply_html(_all_commands_text(config.is_admin(user.id)))
+    await message.reply_html(_all_commands_text(config.is_admin(user.id)))
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Welcome the user and show their current access status."""
     user = update.effective_user
-    if not user:
+    message = update.message
+    if not user or not message:
         return
 
     # Always register so the admin can see who contacted the bot
@@ -93,11 +96,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         record = await db.get_user(user.id)
     except Exception as exc:
         logger.exception("Failed to register user_id=%s on /start", user.id)
-        await update.message.reply_html(
+        await message.reply_html(
             format_error(user.id, "⚠️ Something went wrong. Please try again.", exc)
         )
         return
-    status = record["status"] if record else "unknown"
+    status: menu.PhaseStatus = record["status"] if record else "unknown"
     reply_markup = None
 
     if status == "approved":
@@ -105,7 +108,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             profile = await db.get_profile(user.id)
         except Exception as exc:
             logger.exception("Failed to fetch profile for user_id=%s on /start", user.id)
-            await update.message.reply_html(
+            await message.reply_html(
                 format_error(user.id, "⚠️ Something went wrong. Please try again.", exc)
             )
             return
@@ -123,7 +126,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Tap a button below to run a check, or use /help to see all available commands."
             )
             reply_markup = menu.build_help_keyboard(
-                {"is_approved": True, "has_profile": True, "is_admin": config.is_admin(user.id)}
+                {
+                    "status": status,
+                    "is_approved": True,
+                    "has_profile": True,
+                    "is_admin": config.is_admin(user.id),
+                }
             )
         else:
             msg = (
@@ -162,7 +170,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         reply_markup = InlineKeyboardMarkup([menu.all_commands_row()])
 
-    await update.message.reply_text(msg, reply_markup=reply_markup)
+    await message.reply_text(msg, reply_markup=reply_markup)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -172,7 +180,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     command reference instead (see list_commands_command).
     """
     user = update.effective_user
-    if not user:
+    message = update.effective_message
+    if not user or not message:
         return
 
     if context.args and context.args[0].lower() in _LIST_COMMANDS_ARGS:
@@ -192,12 +201,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if phase["is_admin"]:
         text += _HELP_ADMIN_NOTE
 
-    await update.effective_message.reply_html(text, reply_markup=menu.build_help_keyboard(phase))
+    await message.reply_html(text, reply_markup=menu.build_help_keyboard(phase))
 
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Catch-all for /commands that don't match any registered handler."""
-    await update.message.reply_text("❓ Unknown command. Use /help to see all available commands.")
+    message = require(update.message, "message")
+    await message.reply_text("❓ Unknown command. Use /help to see all available commands.")
 
 
 async def request_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

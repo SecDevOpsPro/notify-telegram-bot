@@ -89,7 +89,7 @@ async def test_check_by_licence_success():
         )
         mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        result = await check_by_licence("1234567890", "123456")
+        result = await check_by_licence(national_id="1234567890", licence_number="123456")
 
     assert len(result) == 1
     assert result[0].has_obligations is False
@@ -104,7 +104,7 @@ async def test_check_by_licence_http_error():
         mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with pytest.raises(MVRApiError, match="connection error"):
-            await check_by_licence("1234567890", "123456")
+            await check_by_licence(national_id="1234567890", licence_number="123456")
 
 
 # ── check_by_plate (mocked network) ──────────────────────────────────────────
@@ -128,7 +128,7 @@ async def test_check_by_plate_success():
         )
         mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        result = await check_by_plate("1234567890", "CB1234AB")
+        result = await check_by_plate(national_id="1234567890", plate_number="CB1234AB")
 
     assert result[0].has_obligations is True
     assert "Speeding fine" in result[0].obligations
@@ -280,4 +280,4 @@ async def test_check_by_plate_http_status_error():
         mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with pytest.raises(MVRApiError, match="HTTP 503"):
-            await check_by_plate("1234567890", "CB1234AB")
+            await check_by_plate(national_id="1234567890", plate_number="CB1234AB")

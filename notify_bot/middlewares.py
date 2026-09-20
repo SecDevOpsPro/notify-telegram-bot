@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable
 
-from telegram import Update
+from telegram import CallbackQuery, Update
 from telegram.ext import ContextTypes
 
 from notify_bot import db
+from notify_bot.updates import HandlerCallback
 
 
-def require_approved(handler: Callable) -> Callable:
+def require_approved[T](handler: HandlerCallback[T]) -> HandlerCallback[T | None]:
     """
     Decorator for PTB async command/message handlers.
 
     Allows the handler to execute only when the calling Telegram user has
-    ``status='approved'`` in the database.  Otherwise a friendly message is
-    sent instructing them to use /request.
+    ``status='approved'`` in the database.  Otherwise, a friendly message is
+    sent instructing them to use /request.  A blocked call returns ``None``
+    without running *handler*, so the wrapped handler's return type widens to
+    ``T | None``.
 
     Usage::
 
@@ -27,15 +29,11 @@ def require_approved(handler: Callable) -> Callable:
     """
 
     @functools.wraps(handler)
-    async def wrapper(
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
-        *args: Any,
-        **kwargs: Any,
-    ) -> Any:
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> T | None:
         user = update.effective_user
-        if not user:
-            return
+        message = update.effective_message
+        if not user or not message:
+            return None
 
         record = await db.get_user(user.id)
         if not record or record["status"] != "approved":
@@ -43,14 +41,15 @@ def require_approved(handler: Callable) -> Callable:
             # approval, tapped after access was revoked) would otherwise be left
             # unanswered, hanging on its loading spinner. getattr: menu buttons pass
             # a _ButtonUpdate stand-in that has no callback_query (already answered).
-            if query := getattr(update, "callback_query", None):
+            query: CallbackQuery | None = getattr(update, "callback_query", None)
+            if query is not None:
                 await query.answer()
-            await update.effective_message.reply_text(
+            await message.reply_text(
                 "⛔ You don't have access to this command.\n"
                 "Use /request to ask the admin for access."
             )
-            return
+            return None
 
-        return await handler(update, context, *args, **kwargs)
+        return await handler(update, context)
 
     return wrapper

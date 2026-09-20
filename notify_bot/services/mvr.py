@@ -56,13 +56,34 @@ LAW_MAP: dict[int, str] = {
 # ── Data classes ────────────────────────────────────────────────────────────
 
 
-@dataclass
+#: One entry of an obligation group as the MVR API returns it: a dict carrying
+#: payment data, or a plain string for obligation types with no payment data.
+type RawObligation = dict[str, Any] | str
+
+
+@dataclass(frozen=True, slots=True)
 class Obligation:
     """A single obligation group returned by the MVR API."""
 
     unit_group: int
     unit_group_label: str
-    obligations: list[Any] = field(default_factory=list)
+    obligations: list[RawObligation] = field(default_factory=list)
+
+    @property
+    def has_obligations(self) -> bool:
+        return bool(self.obligations)
+
+
+@dataclass(frozen=True, slots=True)
+class _RenderedGroup:
+    """An :class:`Obligation` group whose entries are already formatted for display.
+
+    Kept separate from :class:`Obligation` so raw API entries and display strings
+    can't be mixed up — ``_OBLIGATIONS_TEMPLATE`` only ever sees this type.
+    """
+
+    unit_group_label: str
+    obligations: list[str]
 
     @property
     def has_obligations(self) -> bool:
@@ -79,7 +100,7 @@ class MVRApiError(Exception):
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 
-async def _fetch(params: dict[str, str]) -> dict:
+async def _fetch(params: dict[str, str]) -> dict[str, Any]:
     cookies = {**_COOKIES, "EAUSessionID": config.MVR_SESSION_ID}
     async with httpx.AsyncClient(
         timeout=60.0,
@@ -87,10 +108,11 @@ async def _fetch(params: dict[str, str]) -> dict:
     ) as client:
         resp = await client.get(_BASE_URL, params=params, headers=_HEADERS, cookies=cookies)
         resp.raise_for_status()
-        return resp.json()
+        payload: dict[str, Any] = resp.json()
+        return payload
 
 
-def _parse(data: dict) -> list[Obligation]:
+def _parse(data: dict[str, Any]) -> list[Obligation]:
     result: list[Obligation] = []
     for unit in data.get("obligationsData", []):
         ug: int = unit.get("unitGroup", 0)
@@ -103,7 +125,7 @@ def _parse(data: dict) -> list[Obligation]:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
-async def check_by_licence(national_id: str, licence_number: str) -> list[Obligation]:
+async def check_by_licence(*, national_id: str, licence_number: str) -> list[Obligation]:
     """
     Check traffic/document obligations by driving licence number.
 
@@ -134,7 +156,7 @@ async def check_by_licence(national_id: str, licence_number: str) -> list[Obliga
     return _parse(data)
 
 
-async def check_by_plate(national_id: str, plate_number: str) -> list[Obligation]:
+async def check_by_plate(*, national_id: str, plate_number: str) -> list[Obligation]:
     """
     Check traffic/document obligations by vehicle plate number.
 
@@ -167,7 +189,7 @@ async def check_by_plate(national_id: str, plate_number: str) -> list[Obligation
 
 # ── Formatting ────────────────────────────────────────────────────────────────
 
-_OBLIGATIONS_TEMPLATE = Template(
+_OBLIGATIONS_TEMPLATE: Template = Template(
     "{% for unit in units %}\n"
     "<b>{{ unit.unit_group_label }}</b>\n"
     "{% if unit.has_obligations %}"
@@ -213,7 +235,7 @@ _DOCUMENT_TYPE_LABELS: dict[str, str] = {
 }
 
 
-def _format_obligation(ob: Any) -> str:
+def _format_obligation(ob: RawObligation) -> str:
     """Render one obligation as a human-readable payment summary.
 
     Unpaid obligations come back from the MVR API as dicts carrying the
@@ -244,7 +266,7 @@ def _format_obligation(ob: Any) -> str:
     doc_series = extra.get("documentSeries")
     doc_number = extra.get("documentNumber")
     if doc_series or doc_number:
-        label = _DOCUMENT_TYPE_LABELS.get(extra.get("documentType"), "Document")
+        label = _DOCUMENT_TYPE_LABELS.get(extra.get("documentType") or "", "Document")
         reference = " ".join(part for part in (doc_series, doc_number) if part)
         lines.append(f"📄 {label}: {reference}")
 
@@ -283,8 +305,7 @@ def _format_obligation(ob: Any) -> str:
 def render_obligations(units: list[Obligation]) -> str:
     """Render a list of Obligation groups as an HTML Telegram message body."""
     formatted_units = [
-        Obligation(
-            unit_group=unit.unit_group,
+        _RenderedGroup(
             unit_group_label=unit.unit_group_label,
             obligations=[_format_obligation(ob) for ob in unit.obligations],
         )

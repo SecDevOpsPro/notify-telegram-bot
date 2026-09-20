@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from telegram import InlineKeyboardButton
+from telegram import InaccessibleMessage, InlineKeyboardButton, Message
 
 from notify_bot.handlers import menu
 
@@ -29,7 +29,7 @@ def _make_callback_update(user_id: int, data: str) -> MagicMock:
     update.callback_query = MagicMock()
     update.callback_query.data = data
     update.callback_query.answer = AsyncMock()
-    update.callback_query.message = MagicMock()
+    update.callback_query.message = MagicMock(spec=Message)
     return update
 
 
@@ -219,6 +219,24 @@ async def test_menu_callback_answers_and_dispatches_to_matching_handler():
     assert called_update.effective_message is update.callback_query.message
     assert called_update.effective_user is update.effective_user
     assert context.args == []
+
+
+@pytest.mark.asyncio
+async def test_menu_callback_skips_dispatch_when_message_is_inaccessible():
+    """Telegram reports an old message as inaccessible — it has no reply_* methods,
+    so the handler must not be run against it (it would crash on reply_html)."""
+    fake_handler = AsyncMock()
+    update = _make_callback_update(10, "cmd:driver")
+    update.callback_query.message = MagicMock(spec=InaccessibleMessage)
+
+    with patch(
+        "notify_bot.handlers.menu._dispatch_table",
+        return_value={"driver": fake_handler},
+    ):
+        await menu.menu_callback(update, MagicMock())
+
+    update.callback_query.answer.assert_awaited_once()
+    fake_handler.assert_not_awaited()
 
 
 @pytest.mark.asyncio

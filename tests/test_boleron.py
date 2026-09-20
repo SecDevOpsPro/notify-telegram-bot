@@ -136,7 +136,7 @@ def test_translate_empty_returns_none() -> None:
 async def test_check_vehicle_data_translates_engine_and_color() -> None:
     payload = {"engine": "Дизелов", "vehicleColorName": "тъмно сива"}
     with patch("notify_bot.services.boleron._get", AsyncMock(return_value=payload)):
-        vehicle = await check_vehicle_data("CB1234AB", "123456789")
+        vehicle = await check_vehicle_data(car_no="CB1234AB", talon_no="123456789")
 
     assert vehicle.engine == "Diesel"
     assert vehicle.color == "Dark Gray"
@@ -145,6 +145,6 @@ async def test_check_vehicle_data_translates_engine_and_color() -> None:
 async def test_check_vehicle_data_keeps_unknown_color_untranslated() -> None:
     payload = {"vehicleColorName": "нещо друго"}
     with patch("notify_bot.services.boleron._get", AsyncMock(return_value=payload)):
-        vehicle = await check_vehicle_data("CB1234AB", "123456789")
+        vehicle = await check_vehicle_data(car_no="CB1234AB", talon_no="123456789")
 
     assert vehicle.color == "нещо друго"

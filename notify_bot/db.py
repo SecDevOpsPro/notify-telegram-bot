@@ -22,7 +22,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Literal, NotRequired, TypedDict, cast
 
 import aiosqlite
 
@@ -30,6 +30,50 @@ logger = logging.getLogger(__name__)
 
 # Allow tests to override DATABASE_PATH via environment variable.
 DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "/app/data/bot.db")
+
+# ── Row types ────────────────────────────────────────────────────────────────
+
+UserStatus = Literal["pending", "approved", "denied"]
+
+
+class UserRow(TypedDict):
+    """A row of the ``users`` table."""
+
+    user_id: int
+    username: str | None
+    first_name: str | None
+    status: UserStatus
+    created_at: str
+
+
+ProfileField = Literal["national_id", "driving_licence", "vehicle_plate", "talon_no"]
+
+
+class ProfileRow(TypedDict):
+    """A row of the ``user_profiles`` table."""
+
+    user_id: int
+    national_id: str | None
+    driving_licence: str | None
+    vehicle_plate: str | None
+    talon_no: str | None
+    updated_at: str
+
+
+class ReportTarget(TypedDict):
+    """One user's data as consumed by the daily report (``scheduler.jobs``).
+
+    ``talon_no`` is optional because ``/brief`` builds this by hand without it
+    (the report doesn't use it); ``get_all_approved_with_profiles`` includes it.
+    """
+
+    user_id: int
+    first_name: str | None
+    national_id: str | None
+    driving_licence: str | None
+    vehicle_plate: str | None
+    talon_no: NotRequired[str | None]
+
 
 # ── Schema ───────────────────────────────────────────────────────────────────
 
@@ -96,7 +140,7 @@ async def _locked_conn() -> AsyncIterator[aiosqlite.Connection]:
         yield _conn()
 
 
-async def _write(sql: str, params: tuple = ()) -> None:
+async def _write(sql: str, params: tuple[Any, ...] = ()) -> None:
     """Execute a write statement on the shared connection and commit.
 
     Rolls back on failure so a raised exception never leaves an open
@@ -195,33 +239,33 @@ async def upsert_user(
     )
 
 
-async def get_user(user_id: int) -> Optional[dict]:
+async def get_user(user_id: int) -> UserRow | None:
     async with _locked_conn() as conn:
         async with conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cur:
             row = await cur.fetchone()
-            return dict(row) if row else None
+            return cast(UserRow, dict(row)) if row else None
 
 
-async def set_user_status(user_id: int, status: str) -> None:
-    """Update a user's approval status ('pending' | 'approved' | 'denied')."""
+async def set_user_status(user_id: int, status: UserStatus) -> None:
+    """Update a user's approval status."""
     await _write("UPDATE users SET status = ? WHERE user_id = ?", (status, user_id))
 
 
-async def list_users_by_status(status: str) -> list[dict]:
+async def list_users_by_status(status: UserStatus) -> list[UserRow]:
     async with _locked_conn() as conn:
         async with conn.execute("SELECT * FROM users WHERE status = ?", (status,)) as cur:
             rows = await cur.fetchall()
-            return [dict(r) for r in rows]
+            return [cast(UserRow, dict(r)) for r in rows]
 
 
 # ── Profiles ──────────────────────────────────────────────────────────────────
 
 
-async def get_profile(user_id: int) -> Optional[dict]:
+async def get_profile(user_id: int) -> ProfileRow | None:
     async with _locked_conn() as conn:
         async with conn.execute("SELECT * FROM user_profiles WHERE user_id = ?", (user_id,)) as cur:
             row = await cur.fetchone()
-            return dict(row) if row else None
+            return cast(ProfileRow, dict(row)) if row else None
 
 
 async def upsert_profile(
@@ -264,7 +308,7 @@ async def delete_profile(user_id: int) -> None:
 # ── Scheduler helpers ─────────────────────────────────────────────────────────
 
 
-async def get_all_approved_with_profiles() -> list[dict]:
+async def get_all_approved_with_profiles() -> list[ReportTarget]:
     """Return approved users who have at least one profile field populated."""
     async with _locked_conn() as conn:
         async with conn.execute(
@@ -287,4 +331,4 @@ async def get_all_approved_with_profiles() -> list[dict]:
             """
         ) as cur:
             rows = await cur.fetchall()
-            return [dict(r) for r in rows]
+            return [cast(ReportTarget, dict(r)) for r in rows]

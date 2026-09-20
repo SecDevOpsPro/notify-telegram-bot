@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import urllib.parse
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
@@ -111,7 +112,7 @@ def _coerce_bool(value: object) -> bool | None:
 # ── Data classes ──────────────────────────────────────────────────────────────
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class StickerInfo:
     """
     Parking e-vignette sticker data returned by the API.
@@ -131,7 +132,7 @@ class StickerInfo:
     status: str | None = None
 
     # Raw payload for forward-compatibility
-    raw: dict = field(default_factory=dict, compare=False, repr=False)
+    raw: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
     @property
     def is_valid(self) -> bool:
@@ -142,7 +143,7 @@ class StickerInfo:
         return s in {"VALID", "ACTIVE", "OK", "ACTIVE_STICKER"} or (self.found and not self.status)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ClampInfo:
     """
     Wheel-clamp status data returned by the API.
@@ -160,13 +161,13 @@ class ClampInfo:
     release_instructions: str | None = None
 
     # Raw payload for forward-compatibility
-    raw: dict = field(default_factory=dict, compare=False, repr=False)
+    raw: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
 
 # ── Parsers ───────────────────────────────────────────────────────────────────
 
 
-def _parse_sticker(plate: str, data: dict) -> StickerInfo:
+def _parse_sticker(plate: str, data: dict[str, Any]) -> StickerInfo:
     """
     Parse the /sticker API response into a :class:`StickerInfo`.
 
@@ -177,7 +178,9 @@ def _parse_sticker(plate: str, data: dict) -> StickerInfo:
     if "sticker" in data and data["sticker"] is None:
         return StickerInfo(plate=plate, found=False, raw=data)
 
-    payload: dict = data.get("sticker") or data.get("stickerData") or data.get("data") or data
+    payload: dict[str, Any] = (
+        data.get("sticker") or data.get("stickerData") or data.get("data") or data
+    )
 
     if (
         not payload
@@ -205,7 +208,7 @@ def _parse_sticker(plate: str, data: dict) -> StickerInfo:
     )
 
 
-def _parse_clamp(plate: str, data: dict) -> ClampInfo:
+def _parse_clamp(plate: str, data: dict[str, Any]) -> ClampInfo:
     """
     Parse the /clamp API response into a :class:`ClampInfo`.
 
@@ -215,7 +218,7 @@ def _parse_clamp(plate: str, data: dict) -> ClampInfo:
     if "clamp" in data and data["clamp"] is None:
         return ClampInfo(plate=plate, found=False, clamped=False, raw=data)
 
-    payload: dict = data.get("clamp") or data.get("clampData") or data.get("data") or {}
+    payload: dict[str, Any] = data.get("clamp") or data.get("clampData") or data.get("data") or {}
 
     if not payload:
         # Check for a boolean "clamped" field at top level
@@ -269,7 +272,7 @@ def _parse_clamp(plate: str, data: dict) -> ClampInfo:
 # ── FlareSolverr helper ───────────────────────────────────────────────────────
 
 
-async def _get_cookies_via_flaresolverr() -> tuple[dict, str]:
+async def _get_cookies_via_flaresolverr() -> tuple[dict[str, str], str]:
     """
     Use FlareSolverr's REST API to fetch the parking page through the browser,
     bypassing the Cloudflare challenge and returning the session cookies.
@@ -306,7 +309,9 @@ async def _get_cookies_via_flaresolverr() -> tuple[dict, str]:
     if data.get("status") != "ok":
         raise CsrfFetchError(f"FlareSolverr failed: {data.get('message', 'unknown error')}")
 
-    cookies: dict = {c["name"]: c["value"] for c in data.get("solution", {}).get("cookies", [])}
+    cookies: dict[str, str] = {
+        c["name"]: c["value"] for c in data.get("solution", {}).get("cookies", [])
+    }
     xsrf_raw = cookies.get("XSRF-TOKEN")
     if not xsrf_raw:
         raise CsrfFetchError("FlareSolverr: XSRF-TOKEN not found in cookies")
@@ -318,7 +323,7 @@ async def _get_cookies_via_flaresolverr() -> tuple[dict, str]:
 # ── Internal CSRF helper ──────────────────────────────────────────────────────
 
 
-def _parse_json_response(resp: httpx.Response) -> dict:
+def _parse_json_response(resp: httpx.Response) -> dict[str, Any]:
     """
     Extract JSON from a response with specific handling for Cloudflare silent blocks.
 
@@ -339,9 +344,10 @@ def _parse_json_response(resp: httpx.Response) -> dict:
             raise CloudflareError("Cloudflare challenge page returned instead of JSON response.")
         raise SofiaTrafficError(f"API returned non-JSON content-type '{content_type}': {snippet!r}")
     try:
-        return resp.json()
+        payload: dict[str, Any] = resp.json()
     except Exception as exc:
         raise SofiaTrafficError("API returned malformed JSON response") from exc
+    return payload
 
 
 async def _get_csrf_client() -> tuple[httpx.AsyncClient, str]:

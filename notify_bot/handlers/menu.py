@@ -192,21 +192,24 @@ class _ButtonUpdate:
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Dispatch every "cmd:<name>" button tap on the /help menu to its handler."""
     query = require(update.callback_query, "callback_query")
-    await query.answer()
 
     _, _, action = (query.data or "").partition(":")
     handler = _dispatch_table().get(action)
     if handler is None:
         logger.warning("Unknown menu button callback_data=%s", query.data)
+        await query.answer()
         return
 
     # An old enough message is reported by Telegram as inaccessible: it has an id
-    # but no content, and none of the reply_* methods the handlers rely on.
+    # but no content, and none of the reply_* methods the handlers rely on. A query
+    # can be answered only once, so this check comes before the plain answer().
     message = query.message
     if not isinstance(message, Message):
         logger.warning("Menu button tapped on an inaccessible message: %s", query.data)
+        await query.answer("This menu has expired. Send /help again.", show_alert=True)
         return
 
+    await query.answer()
     context.args = []
     # _ButtonUpdate only implements the attributes handlers read (see its docstring),
     # so it is not a real Update — hence the cast at this one hand-off point.

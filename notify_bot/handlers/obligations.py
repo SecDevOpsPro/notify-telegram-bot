@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import logging
 
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from notify_bot import db
 from notify_bot.formatting import align_fields
 from notify_bot.middlewares import require_approved
+from notify_bot.payment_buttons import build_copy_keyboard
 from notify_bot.services.bgtoll import (
     BgtollError,
     CloudflareBlockedError,
@@ -39,9 +40,10 @@ from notify_bot.services.boleron import (
 )
 from notify_bot.services.mvr import (
     MVRApiError,
+    Obligation,
     check_by_licence,
     check_by_plate,
-    render_obligations,
+    render_fine_messages,
 )
 from notify_bot.services.sofiatraffic import (
     CloudflareError as SofiaCloudflareError,
@@ -54,6 +56,12 @@ from notify_bot.services.sofiatraffic import (
 from notify_bot.updates import require
 
 logger = logging.getLogger(__name__)
+
+
+async def _reply_with_obligations(message: Message, units: list[Obligation]) -> None:
+    """Send an obligations check: one message per payable fine, each with its copy buttons."""
+    for part in render_fine_messages(units):
+        await message.reply_html(part.text, reply_markup=build_copy_keyboard(part.payment))
 
 
 # ── /driver ───────────────────────────────────────────────────────────────────
@@ -84,7 +92,7 @@ async def driver_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await message.reply_text(f"⚠️ MVR API error: {exc}")
         return
 
-    await message.reply_html("<b>🔎 Obligations check</b>\n" + render_obligations(units))
+    await _reply_with_obligations(message, units)
 
 
 # ── /vignette ─────────────────────────────────────────────────────────────────
@@ -317,7 +325,7 @@ async def plate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await message.reply_text(f"⚠️ MVR API error: {exc}")
         return
 
-    await message.reply_html("<b>🔎 Obligations check</b>\n" + render_obligations(units))
+    await _reply_with_obligations(message, units)
 
 
 # ── /gtp ──────────────────────────────────────────────────────────────────────

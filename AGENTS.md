@@ -46,6 +46,8 @@ notify_bot/
   db.py            async SQLite layer, single shared connection
   errors.py        format_error() — verbose detail for admin/debug users only
   formatting.py    align_fields() — label/value rows that line up in Telegram's proportional font
+  payment_buttons.py  build_copy_keyboard() — tap-to-copy (copy_text) buttons for one fine's IBAN/BIC/reason/amount;
+                   build_fines_keyboard() — the daily report's /driver and /plate shortcut buttons
   middlewares.py   @require_approved decorator
   updates.py       require() to narrow PTB's optional Update fields; HandlerCallback type
   handlers/        one module per command group

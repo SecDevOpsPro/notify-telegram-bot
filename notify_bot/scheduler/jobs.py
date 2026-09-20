@@ -16,14 +16,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable, Coroutine, Type, cast
 
+from telegram import InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from notify_bot import db
 from notify_bot.dates import parse_datetime
 from notify_bot.db import ReportTarget
+from notify_bot.payment_buttons import build_fines_keyboard
 from notify_bot.services.bgtoll import (
     BgtollError,
     CloudflareBlockedError,
@@ -40,6 +43,7 @@ from notify_bot.services.boleron import (
 )
 from notify_bot.services.mvr import (
     MVRApiError,
+    Obligation,
     check_by_licence,
     check_by_plate,
     render_obligations,
@@ -132,9 +136,17 @@ async def _retry[T](
 # ── Per-user report ───────────────────────────────────────────────────────────
 
 
-async def _build_report_message(user: ReportTarget) -> str | None:
+@dataclass(frozen=True, slots=True)
+class _Report:
+    """One user's daily report: the message text plus its /driver and /plate fine shortcuts."""
+
+    text: str
+    reply_markup: InlineKeyboardMarkup | None
+
+
+async def _build_report(user: ReportTarget) -> _Report | None:
     """
-    Run all obligation checks for one user and compose the report text.
+    Run all obligation checks for one user and compose their report.
 
     Returns ``None`` when there is nothing to report (every check came back
     clean or unavailable) — the "no news is good news" convention used
@@ -147,11 +159,14 @@ async def _build_report_message(user: ReportTarget) -> str | None:
     plate: str | None = user.get("vehicle_plate")
 
     sections: list[str] = []
+    licence_units: list[Obligation] = []  # decide which /driver, /plate buttons the report gets
+    plate_units: list[Obligation] = []
 
     if national_id and licence:
         try:
             units = await _retry(check_by_licence, national_id=national_id, licence_number=licence)
             sections.append("🪪 <b>By driving licence:</b>\n" + render_obligations(units))
+            licence_units = units
         except MVRApiError as exc:
             logger.warning("Licence check failed for user %s: %s", uid, exc)
             sections.append(f"🪪 <b>By driving licence:</b>\n⚠️ Check failed: {exc}")
@@ -162,6 +177,7 @@ async def _build_report_message(user: ReportTarget) -> str | None:
         try:
             units = await _retry(check_by_plate, national_id=national_id, plate_number=plate)
             sections.append("🚗 <b>By vehicle plate (MVR):</b>\n" + render_obligations(units))
+            plate_units = units
         except MVRApiError as exc:
             logger.warning("Plate check failed for user %s: %s", uid, exc)
             sections.append(f"🚗 <b>By vehicle plate (MVR):</b>\n⚠️ Check failed: {exc}")
@@ -314,7 +330,10 @@ async def _build_report_message(user: ReportTarget) -> str | None:
     if not sections:
         return None
 
-    return f"☀️ Good morning, {name}!\n\n" + "\n\n".join(sections)
+    return _Report(
+        text=f"☀️ Good morning, {name}!\n\n" + "\n\n".join(sections),
+        reply_markup=build_fines_keyboard(licence=licence_units, plate=plate_units),
+    )
 
 
 async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -326,11 +345,13 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     user = cast(ReportTarget, require(context.job, "job").data)
     uid: int = user["user_id"]
-    message = await _build_report_message(user)
-    if message is None:
+    report = await _build_report(user)
+    if report is None:
         return
     try:
-        await context.bot.send_message(chat_id=uid, text=message, parse_mode="HTML")
+        await context.bot.send_message(
+            chat_id=uid, text=report.text, parse_mode="HTML", reply_markup=report.reply_markup
+        )
         logger.debug("Daily report sent to user %s", uid)
     except Exception as exc:
         logger.warning("Could not deliver daily report to user %s: %s", uid, exc)
@@ -343,15 +364,20 @@ async def send_user_report_now(context: ContextTypes.DEFAULT_TYPE, user: ReportT
     Public counterpart to ``_send_user_report`` for callers that need the
     result synchronously — currently the admin ``/brief`` command — and
     need to know whether a report was actually sent, since an empty result
-    is silent by design (see ``_build_report_message``).
+    is silent by design (see ``_build_report``).
 
     Returns ``True`` if a report was sent, ``False`` if there was nothing
     to report.
     """
-    message = await _build_report_message(user)
-    if message is None:
+    report = await _build_report(user)
+    if report is None:
         return False
-    await context.bot.send_message(chat_id=user["user_id"], text=message, parse_mode="HTML")
+    await context.bot.send_message(
+        chat_id=user["user_id"],
+        text=report.text,
+        parse_mode="HTML",
+        reply_markup=report.reply_markup,
+    )
     return True
 
 

@@ -32,16 +32,19 @@ def require_approved[T](handler: HandlerCallback[T]) -> HandlerCallback[T | None
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> T | None:
         user = update.effective_user
         message = update.effective_message
+        # A button tap on a stale keyboard (e.g. "📝 Enroll your data" sent on
+        # approval, tapped after access was revoked, or old enough that Telegram
+        # reports its message as inaccessible) must always be answered, otherwise
+        # it hangs on its loading spinner. getattr: menu buttons pass a
+        # _ButtonUpdate stand-in that has no callback_query (already answered).
+        query: CallbackQuery | None = getattr(update, "callback_query", None)
         if not user or not message:
+            if query is not None:
+                await query.answer()
             return None
 
         record = await db.get_user(user.id)
         if not record or record["status"] != "approved":
-            # A button tap on a stale keyboard (e.g. "📝 Enroll your data" sent on
-            # approval, tapped after access was revoked) would otherwise be left
-            # unanswered, hanging on its loading spinner. getattr: menu buttons pass
-            # a _ButtonUpdate stand-in that has no callback_query (already answered).
-            query: CallbackQuery | None = getattr(update, "callback_query", None)
             if query is not None:
                 await query.answer()
             await message.reply_text(

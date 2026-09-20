@@ -236,6 +236,8 @@ async def test_menu_callback_skips_dispatch_when_message_is_inaccessible():
         await menu.menu_callback(update, MagicMock())
 
     update.callback_query.answer.assert_awaited_once()
+    assert "expired" in update.callback_query.answer.call_args.args[0]
+    assert update.callback_query.answer.call_args.kwargs["show_alert"] is True
     fake_handler.assert_not_awaited()
 
 

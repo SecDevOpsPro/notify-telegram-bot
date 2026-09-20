@@ -112,6 +112,27 @@ async def test_blocked_button_tap_answers_callback_query():
 
 
 @pytest.mark.asyncio
+async def test_button_tap_on_inaccessible_message_still_answers_query():
+    """Regression test: a tap on a message old enough for Telegram to report it as
+    inaccessible has no effective_message. The handler is skipped, but the tap must
+    still be answered or the button spins forever."""
+    handler = AsyncMock()
+    decorated = require_approved(handler)
+    update = _make_update(77)
+    update.effective_message = None
+    update.callback_query = MagicMock()
+    update.callback_query.answer = AsyncMock()
+
+    with patch("notify_bot.middlewares.db.get_user", new=AsyncMock()) as get_user:
+        result = await decorated(update, MagicMock())
+
+    assert result is None
+    handler.assert_not_awaited()
+    get_user.assert_not_awaited()
+    update.callback_query.answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_blocked_user_via_button_stand_in_without_callback_query():
     """menu_callback passes a _ButtonUpdate with no callback_query attribute
     (it has already answered the tap) — the block path must not trip on that."""
@@ -137,6 +158,7 @@ async def test_no_effective_user_is_silently_ignored():
 
     update = MagicMock()
     update.effective_user = None
+    update.callback_query = None
 
     with patch("notify_bot.middlewares.db.get_user", new=AsyncMock()) as mock_get:
         await decorated(update, MagicMock())

@@ -19,6 +19,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from notify_bot import db
+from notify_bot.formatting import align_fields
 from notify_bot.middlewares import require_approved
 from notify_bot.services.bgtoll import (
     BgtollError,
@@ -499,25 +500,28 @@ async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await message.reply_text(f"⚠️ Service error: {exc}")
         return
 
-    lines = [
-        f"🚗 <b>Vehicle: {v.make_model or ((v.make or '') + ' ' + (v.model or '')).strip()}</b>",
-    ]
+    fields: list[tuple[str, str]] = []
     if v.build_year:
-        lines.append(f"Year:        {v.build_year}")
+        fields.append(("Year", str(v.build_year)))
     if v.first_reg_date:
-        lines.append(f"First reg:   {v.first_reg_date}")
+        fields.append(("First reg", v.first_reg_date))
     if v.vin:
-        lines.append(f"VIN:         <code>{v.vin}</code>")
+        fields.append(("VIN", f"<code>{v.vin}</code>"))
     if v.engine:
         cc = f" / {v.engine_cc} cc" if v.engine_cc else ""
         kw = f" / {v.power_kw} kW" if v.power_kw else ""
-        lines.append(f"Engine:      {v.engine}{cc}{kw}")
+        fields.append(("Engine", f"{v.engine}{cc}{kw}"))
     if v.color:
-        lines.append(f"Color:       {v.color}")
+        fields.append(("Color", v.color))
     if v.vehicle_class:
-        lines.append(f"Class:       {v.vehicle_class}")
+        fields.append(("Class", v.vehicle_class))
     if v.seats:
-        lines.append(f"Seats:       {v.seats}")
+        fields.append(("Seats", str(v.seats)))
+
+    lines = [
+        f"🚗 <b>Vehicle: {v.make_model or ((v.make or '') + ' ' + (v.model or '')).strip()}</b>",
+        *align_fields(fields),
+    ]
     if v.leasing:
         lines.append("🏦 Leasing vehicle")
 

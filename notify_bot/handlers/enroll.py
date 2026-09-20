@@ -452,9 +452,7 @@ def build_enroll_handler() -> ConversationHandler:
     # commands and free-text replies. The per-user conversation is what we want,
     # and stale buttons are caught by build_stale_enroll_button_handler().
     with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", message="If 'per_message=False'", category=PTBUserWarning
-        )
+        warnings.filterwarnings("ignore", message="If 'per_message=False'", category=PTBUserWarning)
         return _build_enroll_conversation()
 
 

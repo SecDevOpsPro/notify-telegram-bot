@@ -45,6 +45,7 @@ notify_bot/
   config.py        all env-var config in one place
   db.py            async SQLite layer, single shared connection
   errors.py        format_error() — verbose detail for admin/debug users only
+  formatting.py    align_fields() — label/value rows that line up in Telegram's proportional font
   middlewares.py   @require_approved decorator
   updates.py       require() to narrow PTB's optional Update fields; HandlerCallback type
   handlers/        one module per command group

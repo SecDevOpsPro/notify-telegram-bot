@@ -99,6 +99,11 @@ def test_parse_nested_vignette_key():
     assert result.vignette_series == "B12345"
 
 
+def test_parse_translates_bulgarian_emission_class():
+    data = {"vignette": {"emissionsClass": "Клас на емисиите Евро 0, Евро 1, Евро 2"}}
+    assert _parse("XH2856", "BG", data).emission_class == "Euro 0, Euro 1, Euro 2"
+
+
 def test_parse_keeps_raw_validity_dates_with_time():
     """_parse stores the raw date+time strings; formatting happens at render time."""
     data = {

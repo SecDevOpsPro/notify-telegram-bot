@@ -9,7 +9,6 @@ Two lookup modes are supported:
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -17,6 +16,7 @@ import httpx
 from jinja2 import Template
 
 from notify_bot import config
+from notify_bot.translation import translate_breach
 
 logger = logging.getLogger(__name__)
 
@@ -210,25 +210,6 @@ def _iso_to_bg_date(value: str | None) -> str | None:
         return value
 
 
-# (pattern, replacement) pairs applied in order.
-_BG_LEGAL_ABBR: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"от\s+ЗДвП\b", re.IGNORECASE), "of the Road Traffic Act"),
-    (re.compile(r"\bчл\.\s*"), "Art. "),
-    (re.compile(r"\bал\.\s*"), "para. "),
-    (re.compile(r"\bт\.\s*"), "item "),
-)
-
-
-def _translate_breach(text: str) -> str:
-    """Expand known Bulgarian legal-citation abbreviations (чл./ал./...) to English.
-
-    Any part of ``text`` that doesn't match a known abbreviation is left unchanged.
-    """
-    for pattern, replacement in _BG_LEGAL_ABBR:
-        text = pattern.sub(replacement, text)
-    return text
-
-
 #: Maps ``additionalData.documentType`` to a human-readable label.
 _DOCUMENT_TYPE_LABELS: dict[str, str] = {
     "TICKET": "Ticket",
@@ -276,7 +257,7 @@ def _format_obligation(ob: RawObligation) -> str:
     if vehicle:
         lines.append(f"🚗 Vehicle: {vehicle}")
     if breach:
-        violation_line = f"⚖️ Violation: {_translate_breach(breach)}"
+        violation_line = f"⚖️ Violation: {translate_breach(breach)}"
         if breach_date:
             violation_line += f" ({breach_date})"
         lines.append(violation_line)

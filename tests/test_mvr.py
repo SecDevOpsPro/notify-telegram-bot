@@ -12,7 +12,6 @@ from notify_bot.services.mvr import (
     Obligation,
     _format_obligation,
     _parse,
-    _translate_breach,
     check_by_licence,
     check_by_plate,
     render_obligations,
@@ -211,23 +210,6 @@ def test_format_obligation_breach_without_road_traffic_act_suffix():
     result = _format_obligation(ob)
     assert "🚗 Vehicle: XH2856" in result
     assert "⚖️ Violation: Art. 5, para. 3" in result
-
-
-# ── _translate_breach ─────────────────────────────────────────────────────────
-
-
-def test_translate_breach_expands_common_abbreviations():
-    assert (
-        _translate_breach("чл. 21, ал. 2, от ЗДвП") == "Art. 21, para. 2, of the Road Traffic Act"
-    )
-
-
-def test_translate_breach_item_abbreviation():
-    assert _translate_breach("чл. 137, ал. 1, т. 2") == "Art. 137, para. 1, item 2"
-
-
-def test_translate_breach_leaves_unrecognized_text_untouched():
-    assert _translate_breach("some other text") == "some other text"
 
 
 def test_render_obligations_formats_payment_dict():

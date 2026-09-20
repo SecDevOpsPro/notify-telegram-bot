@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 
 from notify_bot.dates import format_date, parse_datetime
+from notify_bot.translation import translate_emission_class
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,9 @@ def _parse(plate: str, country: str, data: dict[str, Any]) -> VignetteInfo:
             "validityDateToFormated", "validityDateTo", "validTo", "to", "endDate", "dateTo"
         ),
         vignette_type=_get("vignetteType", "type", "category"),
-        emission_class=_get("emissionsClass", "emissionClass", "emission", "euroClass"),
+        emission_class=translate_emission_class(
+            _get("emissionsClass", "emissionClass", "emission", "euroClass")
+        ),
         vehicle_type=_get("vehicleType", "vehicleTypeCode", "vehicle", "vehicleCategory"),
         status=_get("status", "vignetteStatus", "state"),
         status_boolean=_coerce_bool(status_bool_raw),

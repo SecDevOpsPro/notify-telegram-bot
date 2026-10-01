@@ -70,7 +70,10 @@ wired up in `run_bot.py`.
 - **Error visibility split.** `errors.format_error()` gives full exception
   detail only to the admin / users in `config.DEBUG_USER_IDS`; everyone
   else gets a terse message. Keep new error paths going through it rather
-  than leaking tracebacks to regular users.
+  than leaking tracebacks to regular users. Service exceptions subclass
+  `errors.ServiceError` — pass `response=resp` (or chain the
+  `httpx.HTTPStatusError`) so debug users see the request, status and body.
+  Add any new sensitive query parameter to `errors._REDACTED_PARAMS`.
 - **Access control.** Commands that touch user data go through
   `@require_approved` (`middlewares.py`). Public commands (`/start`,
   `/help`, `/request`, `/change`) intentionally skip it.

@@ -14,6 +14,7 @@ _PROFILE = {
     "national_id": "1234567890",
     "driving_licence": "123456789",
     "vehicle_plate": "CA1234AB",
+    "talon_no": "009999999",
 }
 
 
@@ -206,6 +207,7 @@ async def test_sends_report_and_confirms():
         "national_id": "1234567890",
         "driving_licence": "123456789",
         "vehicle_plate": "CA1234AB",
+        "talon_no": "009999999",
     }
     assert "✅" in _last_reply(update)
     assert "555" in _last_reply(update)

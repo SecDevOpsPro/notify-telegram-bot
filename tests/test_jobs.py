@@ -10,7 +10,6 @@ import pytest
 
 from notify_bot.scheduler.jobs import (
     _build_report,
-    _days_until,
     _retry,
     daily_obligations_report,
     send_user_report_now,
@@ -34,6 +33,7 @@ _FULL_USER = {
     "national_id": "1234567890",
     "driving_licence": "123456789",
     "vehicle_plate": PLATE,
+    "talon_no": "009999999",
 }
 
 
@@ -45,31 +45,6 @@ async def _report_text(user) -> str | None:
 
 def _soon(days: int) -> str:
     return (date.today() + timedelta(days=days)).strftime("%d.%m.%Y")
-
-
-# ── _days_until ───────────────────────────────────────────────────────────────
-
-
-def test_days_until_none_when_no_date():
-    assert _days_until(None) is None
-
-
-def test_days_until_bg_format():
-    assert _days_until(_soon(5)) == 5
-
-
-def test_days_until_iso_format():
-    iso = (date.today() + timedelta(days=3)).strftime("%Y-%m-%d")
-    assert _days_until(iso) == 3
-
-
-def test_days_until_negative_for_past_date():
-    past = (date.today() - timedelta(days=2)).strftime("%d.%m.%Y")
-    assert _days_until(past) == -2
-
-
-def test_days_until_none_when_unparseable():
-    assert _days_until("not-a-date") is None
 
 
 # ── _retry ────────────────────────────────────────────────────────────────────
@@ -207,7 +182,7 @@ async def test_licence_obligations_section_included_on_success():
 async def test_licence_check_failure_shows_error_line():
     with _patched(licence=AsyncMock(side_effect=MVRApiError("MVR API returned HTTP 500"))):
         message = await _report_text(_FULL_USER)
-    assert "🪪 <b>By driving licence:</b>\n⚠️ Check failed: MVR API returned HTTP 500" in message
+    assert "🪪 <b>By driving licence:</b>\n⚠️ Check failed — try /driver later." in message
 
 
 @pytest.mark.asyncio
@@ -226,7 +201,7 @@ async def test_plate_obligations_section_included_on_success():
 async def test_plate_check_failure_shows_error_line():
     with _patched(plate=AsyncMock(side_effect=MVRApiError("boom"))):
         message = await _report_text(_FULL_USER)
-    assert "🚗 <b>By vehicle plate (MVR):</b>\n⚠️ Check failed: boom" in message
+    assert "🚗 <b>By vehicle plate (MVR):</b>\n⚠️ Check failed — try /plate later." in message
 
 
 # ── Vignette section ──────────────────────────────────────────────────────────
@@ -288,11 +263,10 @@ async def test_vignette_bgtoll_error_falls_back_to_boleron_not_found():
 
 
 @pytest.mark.asyncio
-async def test_report_omits_parking_sticker_section_when_not_found():
-    """No news is good news: an absent sticker shouldn't clutter the daily digest."""
+async def test_report_shows_parking_sticker_section_when_not_found():
     with _patched():
         message = await _report_text(_FULL_USER)
-    assert "Parking sticker" not in message
+    assert f"🅿️ <b>Parking sticker ({PLATE}):</b>\n➖ No sticker found." in message
 
 
 @pytest.mark.asyncio
@@ -314,11 +288,11 @@ async def test_report_includes_parking_sticker_section_when_found():
 
 
 @pytest.mark.asyncio
-async def test_report_omits_wheel_clamp_section_when_not_clamped():
+async def test_report_shows_wheel_clamp_section_when_not_clamped():
     clamp = ClampInfo(plate=PLATE, found=True, clamped=False)
     with _patched(sticker_and_clamp=AsyncMock(return_value=(_DEFAULT_STICKER, clamp))):
         message = await _report_text(_FULL_USER)
-    assert "Wheel clamp" not in message
+    assert f"🔒 <b>Wheel clamp ({PLATE}):</b>\n✅ Not clamped." in message
 
 
 @pytest.mark.asyncio
@@ -331,11 +305,21 @@ async def test_report_includes_wheel_clamp_section_when_clamped():
 
 
 @pytest.mark.asyncio
-async def test_sticker_clamp_check_skipped_silently_on_cloudflare_error():
+async def test_sticker_clamp_error_shows_one_failed_section():
     with _patched(sticker_and_clamp=AsyncMock(side_effect=SofiaTrafficError("blocked"))):
         message = await _report_text(_FULL_USER)
-    assert "Parking sticker" not in message
-    assert "Wheel clamp" not in message
+    assert f"🅿️ <b>Parking sticker / wheel clamp ({PLATE}):</b>\n⚠️ Check failed" in message
+    assert message.count("Check failed") == 1
+
+
+@pytest.mark.asyncio
+async def test_sticker_clamp_error_detail_shown_once_to_debug_users():
+    with (
+        _patched(sticker_and_clamp=AsyncMock(side_effect=SofiaTrafficError("blocked"))),
+        patch("notify_bot.errors.config.is_debug_user", return_value=True),
+    ):
+        message = await _report_text(_FULL_USER)
+    assert message.count("SofiaTrafficError: blocked") == 1
 
 
 # ── Technical Inspection (GTP) section ───────────────────────────────────────
@@ -359,11 +343,11 @@ async def test_gtp_not_found():
 
 
 @pytest.mark.asyncio
-async def test_gtp_error_skips_section_without_failing_report():
-    with _patched(gtp=AsyncMock(side_effect=BoleronError("boom"))):
+async def test_gtp_error_still_shows_section():
+    with _patched(gtp=AsyncMock(side_effect=BoleronError("HTTP 400"))):
         message = await _report_text(_FULL_USER)
     assert message is not None
-    assert "Technical Inspection" not in message
+    assert f"🔧 <b>Technical Inspection ({PLATE}):</b>\n⚠️ Check failed" in message
 
 
 # ── Civil Liability (MTPL) section ───────────────────────────────────────────
@@ -390,11 +374,10 @@ async def test_mtpl_inactive_shows_no_active_policy():
 
 
 @pytest.mark.asyncio
-async def test_mtpl_error_skips_section_without_failing_report():
+async def test_mtpl_error_still_shows_section():
     with _patched(mtpl=AsyncMock(side_effect=BoleronError("boom"))):
         message = await _report_text(_FULL_USER)
-    assert message is not None
-    assert "Civil Liability" not in message
+    assert f"🛡️ <b>Civil Liability / MTPL ({PLATE}):</b>\n⚠️ Check failed" in message
 
 
 # ── Traffic Fines section ─────────────────────────────────────────────────────
@@ -413,18 +396,17 @@ async def test_fines_present_with_discount():
 
 
 @pytest.mark.asyncio
-async def test_fines_none_are_omitted():
+async def test_fines_none_are_shown():
     with _patched():
         message = await _report_text(_FULL_USER)
-    assert "Traffic Fines" not in message
+    assert "🚔 <b>Traffic Fines:</b>\n✅ No fines." in message
 
 
 @pytest.mark.asyncio
-async def test_fines_error_skips_section_without_failing_report():
+async def test_fines_error_still_shows_section():
     with _patched(fines=AsyncMock(side_effect=BoleronError("boom"))):
         message = await _report_text(_FULL_USER)
-    assert message is not None
-    assert "Traffic Fines" not in message
+    assert "🚔 <b>Traffic Fines:</b>\n⚠️ Check failed" in message
 
 
 # ── Fine shortcut buttons (/driver, /plate) ───────────────────────────────────
@@ -549,3 +531,23 @@ async def test_daily_obligations_report_schedules_one_job_per_user():
     assert context.job_queue.run_once.call_count == 2
     names = {call.kwargs["name"] for call in context.job_queue.run_once.call_args_list}
     assert names == {"report_user_1", "report_user_2"}
+
+
+@pytest.mark.asyncio
+async def test_gtp_passes_plate_and_talon():
+    gtp = AsyncMock(return_value=GtpInfo(found=False))
+    with _patched(gtp=gtp):
+        await _report_text(_FULL_USER)
+    gtp.assert_awaited_once_with(car_no=PLATE, talon_no="009999999")
+
+
+@pytest.mark.asyncio
+async def test_gtp_without_talon_shows_section_asking_for_it():
+    gtp = AsyncMock()
+    with _patched(gtp=gtp):
+        message = await _report_text({**_FULL_USER, "talon_no": None})
+    gtp.assert_not_awaited()
+    assert (
+        f"🔧 <b>Technical Inspection ({PLATE}):</b>\n⚠️ Talon number missing — save it with /enroll."
+        in message
+    )

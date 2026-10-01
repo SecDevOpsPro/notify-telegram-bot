@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 
 from notify_bot import config
+from notify_bot.errors import ServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ _XHR_HEADERS = {
 # ── Exceptions ────────────────────────────────────────────────────────────────
 
 
-class SofiaTrafficError(Exception):
+class SofiaTrafficError(ServiceError):
     """Base exception for Sofia Traffic API errors."""
 
 
@@ -299,12 +300,12 @@ async def _get_cookies_via_flaresolverr() -> tuple[dict[str, str], str]:
         raise SofiaTrafficError(f"FlareSolverr connection error: {exc}") from exc
 
     if resp.status_code != 200:
-        raise CsrfFetchError(f"FlareSolverr returned HTTP {resp.status_code}")
+        raise CsrfFetchError(f"FlareSolverr returned HTTP {resp.status_code}", response=resp)
 
     try:
         data = resp.json()
     except Exception as exc:
-        raise CsrfFetchError("FlareSolverr returned non-JSON response") from exc
+        raise CsrfFetchError("FlareSolverr returned non-JSON response", response=resp) from exc
 
     if data.get("status") != "ok":
         raise CsrfFetchError(f"FlareSolverr failed: {data.get('message', 'unknown error')}")
@@ -335,18 +336,23 @@ def _parse_json_response(resp: httpx.Response) -> dict[str, Any]:
     if not resp.content:
         raise CloudflareError(
             "API returned empty response body — likely a silent Cloudflare block "
-            "(no cf_clearance cookie)."
+            "(no cf_clearance cookie).",
+            response=resp,
         )
     content_type = resp.headers.get("content-type", "")
     if "json" not in content_type:
         snippet = resp.text[:300]
         if "cloudflare" in snippet.lower() or "challenge" in snippet.lower():
-            raise CloudflareError("Cloudflare challenge page returned instead of JSON response.")
-        raise SofiaTrafficError(f"API returned non-JSON content-type '{content_type}': {snippet!r}")
+            raise CloudflareError(
+                "Cloudflare challenge page returned instead of JSON response.", response=resp
+            )
+        raise SofiaTrafficError(
+            f"API returned non-JSON content-type '{content_type}': {snippet!r}", response=resp
+        )
     try:
         payload: dict[str, Any] = resp.json()
     except Exception as exc:
-        raise SofiaTrafficError("API returned malformed JSON response") from exc
+        raise SofiaTrafficError("API returned malformed JSON response", response=resp) from exc
     return payload
 
 
@@ -387,14 +393,16 @@ async def _get_csrf_client() -> tuple[httpx.AsyncClient, str]:
         await client.aclose()
         raise CloudflareError(
             "Cloudflare blocked the request (status %d) while fetching the parking page."
-            % r.status_code
+            % r.status_code,
+            response=r,
         )
 
     if r.status_code != 200:
         await client.aclose()
         raise SofiaTrafficError(
             f"Parking page returned unexpected status {r.status_code}. "
-            "The site URL may have changed."
+            "The site URL may have changed.",
+            response=r,
         )
 
     xsrf_raw = client.cookies.get("XSRF-TOKEN")
@@ -422,7 +430,8 @@ async def _request_sticker(client: httpx.AsyncClient, xsrf: str, plate: str) -> 
 
     if resp.status_code in (403, 503):
         raise CloudflareError(
-            "Cloudflare blocked the sticker API request (status %d)." % resp.status_code
+            "Cloudflare blocked the sticker API request (status %d)." % resp.status_code,
+            response=resp,
         )
     if resp.status_code == 404:
         return StickerInfo(plate=plate, found=False, raw={})
@@ -443,7 +452,8 @@ async def _request_clamp(client: httpx.AsyncClient, xsrf: str, plate: str) -> Cl
 
     if resp.status_code in (403, 503):
         raise CloudflareError(
-            "Cloudflare blocked the clamp API request (status %d)." % resp.status_code
+            "Cloudflare blocked the clamp API request (status %d)." % resp.status_code,
+            response=resp,
         )
     if resp.status_code == 404:
         return ClampInfo(plate=plate, found=False, clamped=False, raw={})

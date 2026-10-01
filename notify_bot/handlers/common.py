@@ -52,7 +52,7 @@ _ALL_COMMANDS_PUBLIC = """
 /vignette — Check road e-vignette (bgtoll.bg) — also: /vignette &lt;plate&gt;
 /sticker  — Check Sofia parking sticker (sofiatraffic.bg) — also: /sticker &lt;plate&gt;
 /clamp    — Check wheel-clamp status (sofiatraffic.bg) — also: /clamp &lt;plate&gt;
-/gtp      — Check technical inspection validity — also: /gtp &lt;plate&gt;
+/gtp      — Check technical inspection (plate + talon) — also: /gtp &lt;plate&gt; &lt;talon&gt;
 /mtpl     — Check civil liability insurance — also: /mtpl &lt;plate&gt;
 /fines    — Check traffic fines (KAT)
 /vehicle  — Show vehicle registration data (plate + talon required)

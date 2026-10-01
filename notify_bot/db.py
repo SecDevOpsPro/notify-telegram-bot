@@ -22,7 +22,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal, NotRequired, TypedDict, cast
+from typing import Any, AsyncIterator, Literal, TypedDict, cast
 
 import aiosqlite
 
@@ -61,18 +61,14 @@ class ProfileRow(TypedDict):
 
 
 class ReportTarget(TypedDict):
-    """One user's data as consumed by the daily report (``scheduler.jobs``).
-
-    ``talon_no`` is optional because ``/brief`` builds this by hand without it
-    (the report doesn't use it); ``get_all_approved_with_profiles`` includes it.
-    """
+    """One user's data as consumed by the daily report (``scheduler.jobs``)."""
 
     user_id: int
     first_name: str | None
     national_id: str | None
     driving_licence: str | None
     vehicle_plate: str | None
-    talon_no: NotRequired[str | None]
+    talon_no: str | None  # the technical inspection (GTP) check needs plate + talon
 
 
 # ── Schema ───────────────────────────────────────────────────────────────────

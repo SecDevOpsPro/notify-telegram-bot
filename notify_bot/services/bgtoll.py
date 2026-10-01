@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 
 from notify_bot.dates import format_date, parse_datetime
+from notify_bot.errors import ServiceError
 from notify_bot.translation import translate_emission_class
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ _HEADERS = {
 # ── Exceptions ────────────────────────────────────────────────────────────────
 
 
-class BgtollError(Exception):
+class BgtollError(ServiceError):
     """Base exception for bgtoll.bg API errors."""
 
 
@@ -263,7 +264,8 @@ async def check_vignette(
         raise CloudflareBlockedError(
             "Cloudflare blocked the request (status %d). "
             "The bgtoll.bg site requires a browser session to pass the bot-detection challenge."
-            % resp.status_code
+            % resp.status_code,
+            response=resp,
         )
 
     if resp.status_code == 404:
@@ -278,6 +280,6 @@ async def check_vignette(
     try:
         data = resp.json()
     except Exception as exc:
-        raise BgtollError("API returned non-JSON response") from exc
+        raise BgtollError("API returned non-JSON response", response=resp) from exc
 
     return _parse(plate, country, data)

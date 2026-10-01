@@ -266,7 +266,7 @@ async def test_vignette_bgtoll_error_falls_back_to_boleron_not_found():
 async def test_report_shows_parking_sticker_section_when_not_found():
     with _patched():
         message = await _report_text(_FULL_USER)
-    assert f"🅿️ <b>Parking sticker ({PLATE}):</b>\n➖ No sticker found." in message
+    assert f"🅿️ <b>Parking sticker ({PLATE}):</b>\n✅ No sticker found." in message
 
 
 @pytest.mark.asyncio

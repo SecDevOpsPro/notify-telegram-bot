@@ -237,7 +237,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                     sticker_lines.append(f"📍 Zone: {sticker.zone}")
                 sections.append("\n".join(sticker_lines))
             else:
-                sections.append(f"🅿️ <b>Parking sticker ({plate}):</b>\n➖ No sticker found.")
+                sections.append(f"🅿️ <b>Parking sticker ({plate}):</b>\n✅ No sticker found.")
             if clamp.found and clamp.clamped:
                 clamp_lines = [
                     f"🔒 <b>Wheel clamp ({plate}):</b>",

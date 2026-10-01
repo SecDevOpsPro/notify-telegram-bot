@@ -92,9 +92,7 @@ def test_translate_empty_returns_none() -> None:
 
 
 def test_translate_breach_expands_common_abbreviations() -> None:
-    assert (
-        translate_breach("чл. 21, ал. 2, от ЗДвП") == "Art. 21, para. 2, of the Road Traffic Act"
-    )
+    assert translate_breach("чл. 21, ал. 2, от ЗДвП") == "Art. 21, para. 2, of the Road Traffic Act"
 
 
 def test_translate_breach_item_abbreviation() -> None:

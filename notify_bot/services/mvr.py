@@ -18,6 +18,7 @@ from jinja2 import Template
 
 from notify_bot import config
 from notify_bot.dates import parse_datetime
+from notify_bot.errors import ServiceError
 from notify_bot.translation import translate_breach
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ class _RenderedGroup:
 # ── Exceptions ───────────────────────────────────────────────────────────────
 
 
-class MVRApiError(Exception):
+class MVRApiError(ServiceError):
     """Raised when the MVR API returns an unexpected response or HTTP error."""
 
 

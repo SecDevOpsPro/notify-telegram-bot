@@ -4,11 +4,17 @@ Tests for notify_bot.dates
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
-from notify_bot.dates import format_date, parse_datetime
+from notify_bot.dates import (
+    EXPIRY_WARN_DAYS,
+    days_until,
+    expiry_warning,
+    format_date,
+    parse_datetime,
+)
 
 
 @pytest.mark.parametrize(
@@ -42,3 +48,41 @@ def test_parse_datetime_unrecognized(raw: str | None) -> None:
 
 def test_format_date() -> None:
     assert format_date(datetime(2026, 6, 7, 23, 59)) == "07.06.2026"
+
+
+# ── days_until / expiry_warning ──────────────────────────────────────────────
+
+
+def _in(days: int) -> str:
+    return (date.today() + timedelta(days=days)).strftime("%d.%m.%Y")
+
+
+def test_days_until_none_when_no_date():
+    assert days_until(None) is None
+
+
+def test_days_until_bg_format():
+    assert days_until(_in(5)) == 5
+
+
+def test_days_until_iso_format():
+    assert days_until((date.today() + timedelta(days=3)).isoformat()) == 3
+
+
+def test_days_until_negative_for_past_date():
+    assert days_until(_in(-2)) == -2
+
+
+def test_days_until_none_when_unparseable():
+    assert days_until("not-a-date") is None
+
+
+def test_expiry_warning_within_threshold():
+    assert expiry_warning(_in(1)) == "⚠️ Expires in 1 day!"
+    assert expiry_warning(_in(3)) == "⚠️ Expires in 3 days!"
+
+
+def test_expiry_warning_none_outside_threshold():
+    assert expiry_warning(_in(EXPIRY_WARN_DAYS)) is None
+    assert expiry_warning(_in(-1)) is None
+    assert expiry_warning(None) is None

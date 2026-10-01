@@ -22,6 +22,7 @@ import httpx
 
 from notify_bot import config
 from notify_bot.dates import format_date, parse_datetime
+from notify_bot.errors import ServiceError
 from notify_bot.translation import ENGINE_TYPES, translate, translate_color
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ _TOKEN_REFRESH_BUFFER = 120.0  # refresh 2 min before actual expiry
 # ── Exceptions ────────────────────────────────────────────────────────────────
 
 
-class BoleronError(Exception):
+class BoleronError(ServiceError):
     """Base exception for boleron.bg API errors."""
 
 
@@ -87,7 +88,7 @@ async def _get_token() -> str:
         )
 
     if resp.status_code != 200:
-        raise BoleronError(f"Firebase sign-in failed: {resp.status_code}")
+        raise BoleronError(f"Firebase sign-in failed: {resp.status_code}", response=resp)
 
     data = resp.json()
     _token = data["idToken"]
@@ -111,14 +112,14 @@ async def _get(path: str, params: dict[str, Any], *, base: str = _API_BASE) -> d
         raise BoleronError(f"Request error: {exc}") from exc
 
     if resp.status_code == 500:
-        raise BoleronNotFoundError(f"Vehicle not found in boleron database ({path})")
+        raise BoleronNotFoundError(f"Vehicle not found in boleron database ({path})", response=resp)
     if resp.status_code != 200:
-        raise BoleronError(f"HTTP {resp.status_code} from {path}")
+        raise BoleronError(f"HTTP {resp.status_code} from {path}", response=resp)
 
     try:
         payload: dict[str, Any] = resp.json()
     except Exception as exc:
-        raise BoleronError(f"Non-JSON response from {path}") from exc
+        raise BoleronError(f"Non-JSON response from {path}", response=resp) from exc
     return payload
 
 

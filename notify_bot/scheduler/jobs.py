@@ -17,15 +17,15 @@ import asyncio
 import logging
 import random
 from dataclasses import dataclass
-from datetime import date
 from typing import Any, Callable, Coroutine, Type, cast
 
 from telegram import InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from notify_bot import db
-from notify_bot.dates import parse_datetime
+from notify_bot.dates import expiry_warning
 from notify_bot.db import ReportTarget
+from notify_bot.errors import format_error
 from notify_bot.payment_buttons import build_fines_keyboard
 from notify_bot.services.bgtoll import (
     BgtollError,
@@ -73,24 +73,12 @@ _RETRY_ATTEMPTS: int = 3
 #: Base delay (seconds) for exponential backoff — doubles each attempt.
 _RETRY_BASE_DELAY: float = 5.0
 
-#: Days remaining threshold below which an expiry warning is shown.
-_EXPIRY_WARN_DAYS: int = 14
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _days_until(date_str: str | None) -> int | None:
-    """
-    Return the number of days between today and *date_str*.
-
-    Accepts anything :func:`notify_bot.dates.parse_datetime` understands
-    (``dd.mm.yyyy`` and ISO-8601, with or without a time).  Returns ``None``
-    when the input is absent or unparseable.
-    """
-    parsed = parse_datetime(date_str)
-    if parsed is None:
-        return None
-    return (parsed.date() - date.today()).days
+def _check_failed(uid: int, title: str, command: str, exc: Exception) -> str:
+    """Section shown when a check errored — the report always lists every check."""
+    return format_error(uid, f"{title}\n⚠️ Check failed — try /{command} later.", exc)
 
 
 # ── Retry helper ──────────────────────────────────────────────────────────────
@@ -148,9 +136,9 @@ async def _build_report(user: ReportTarget) -> _Report | None:
     """
     Run all obligation checks for one user and compose their report.
 
-    Returns ``None`` when there is nothing to report (every check came back
-    clean or unavailable) — the "no news is good news" convention used
-    throughout this module.
+    Every check that applies to the user gets a section, whether it came back
+    clean, with findings, or failed.  Returns ``None`` only when the user has
+    no profile data that any check applies to.
     """
     uid: int = user["user_id"]
     name: str = user.get("first_name") or "there"
@@ -169,7 +157,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
             licence_units = units
         except MVRApiError as exc:
             logger.warning("Licence check failed for user %s: %s", uid, exc)
-            sections.append(f"🪪 <b>By driving licence:</b>\n⚠️ Check failed: {exc}")
+            sections.append(_check_failed(uid, "🪪 <b>By driving licence:</b>", "driver", exc))
         if plate:  # only pause if plate-based checks follow
             await asyncio.sleep(_INTER_CHECK_DELAY)
 
@@ -180,7 +168,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
             plate_units = units
         except MVRApiError as exc:
             logger.warning("Plate check failed for user %s: %s", uid, exc)
-            sections.append(f"🚗 <b>By vehicle plate (MVR):</b>\n⚠️ Check failed: {exc}")
+            sections.append(_check_failed(uid, "🚗 <b>By vehicle plate (MVR):</b>", "plate", exc))
         await asyncio.sleep(_INTER_CHECK_DELAY)
 
     if plate:
@@ -198,11 +186,8 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 )
                 if vignette.vignette_type:
                     vignette_lines.append(f"📋 Type: {vignette.vignette_type}")
-                remaining = _days_until(vignette.validity_date_to)
-                if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
-                    vignette_lines.append(
-                        f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!"
-                    )
+                if warning := expiry_warning(vignette.validity_date_to):
+                    vignette_lines.append(warning)
                 sections.append("\n".join(vignette_lines))
             else:
                 sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
@@ -224,18 +209,16 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                         bv_lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
                     if bv.price:
                         bv_lines.append(f"💰 Price: {bv.price}")
-                    remaining = _days_until(bv.valid_to)
-                    if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
-                        bv_lines.append(
-                            f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!"
-                        )
+                    if warning := expiry_warning(bv.valid_to):
+                        bv_lines.append(warning)
                     sections.append("\n".join(bv_lines))
                 else:
                     sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
             except BoleronError as exc:
                 logger.warning("Boleron vignette fallback failed for user %s: %s", uid, exc)
-        except BgtollError as exc:
-            logger.warning("Vignette check failed for user %s: %s", uid, exc)
+                sections.append(
+                    _check_failed(uid, f"🛣️ <b>Vignette ({plate}):</b>", "vignette", exc)
+                )
         await asyncio.sleep(_INTER_CHECK_DELAY)
 
     if plate:
@@ -252,7 +235,8 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 if sticker.zone:
                     sticker_lines.append(f"📍 Zone: {sticker.zone}")
                 sections.append("\n".join(sticker_lines))
-            # If not found: omit from daily report (no news is good news)
+            else:
+                sections.append(f"🅿️ <b>Parking sticker ({plate}):</b>\n➖ No sticker found.")
             if clamp.found and clamp.clamped:
                 clamp_lines = [
                     f"🔒 <b>Wheel clamp ({plate}):</b>",
@@ -263,11 +247,19 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 if clamp.location:
                     clamp_lines.append(f"📍 Location: {clamp.location}")
                 sections.append("\n".join(clamp_lines))
-            # If not clamped: omit from daily report (no news is good news)
-        except SofiaCloudflareError:
-            logger.debug("Sticker/clamp check skipped for user %s — Cloudflare blocked", uid)
-        except SofiaTrafficError as exc:
+            else:
+                sections.append(f"🔒 <b>Wheel clamp ({plate}):</b>\n✅ Not clamped.")
+        except (SofiaCloudflareError, SofiaTrafficError) as exc:
             logger.warning("Sticker/clamp check failed for user %s: %s", uid, exc)
+            # One lookup feeds both results, so one failure section (and one error detail).
+            sections.append(
+                format_error(
+                    uid,
+                    f"🅿️ <b>Parking sticker / wheel clamp ({plate}):</b>\n"
+                    "⚠️ Check failed — try /sticker or /clamp later.",
+                    exc,
+                )
+            )
 
     if plate:
         await asyncio.sleep(_INTER_CHECK_DELAY)
@@ -278,11 +270,8 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                     f"🔧 <b>Technical Inspection ({plate}):</b>",
                     f"✅ Valid until: {gtp.valid_to}",
                 ]
-                remaining = _days_until(gtp.valid_to)
-                if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
-                    gtp_lines.append(
-                        f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!"
-                    )
+                if warning := expiry_warning(gtp.valid_to):
+                    gtp_lines.append(warning)
                 sections.append("\n".join(gtp_lines))
             else:
                 sections.append(
@@ -290,6 +279,9 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 )
         except BoleronError as exc:
             logger.warning("GTP check failed for user %s: %s", uid, exc)
+            sections.append(
+                _check_failed(uid, f"🔧 <b>Technical Inspection ({plate}):</b>", "gtp", exc)
+            )
         await asyncio.sleep(_INTER_CHECK_DELAY)
 
         try:
@@ -303,12 +295,14 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 mtpl_lines.append(f"🏢 {mtpl.insurer}")
             if mtpl.valid_to:
                 mtpl_lines.append(f"📅 Valid until: {mtpl.valid_to}")
-            remaining = _days_until(mtpl.valid_to)
-            if remaining is not None and 0 <= remaining < _EXPIRY_WARN_DAYS:
-                mtpl_lines.append(f"⚠️ Expires in {remaining} day{'s' if remaining != 1 else ''}!")
+            if warning := expiry_warning(mtpl.valid_to):
+                mtpl_lines.append(warning)
             sections.append("\n".join(mtpl_lines))
         except BoleronError as exc:
             logger.warning("MTPL check failed for user %s: %s", uid, exc)
+            sections.append(
+                _check_failed(uid, f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>", "mtpl", exc)
+            )
 
     if national_id and licence:
         await asyncio.sleep(_INTER_CHECK_DELAY)
@@ -323,9 +317,11 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 if fines.total_discount > 0:
                     fines_lines.append(f"💸 With discount: {fines.total_discount:.2f} {sym}")
                 sections.append("\n".join(fines_lines))
-            # No fines: omit (no news is good news)
+            else:
+                sections.append("🚔 <b>Traffic Fines:</b>\n✅ No fines.")
         except BoleronError as exc:
             logger.warning("Fines check failed for user %s: %s", uid, exc)
+            sections.append(_check_failed(uid, "🚔 <b>Traffic Fines:</b>", "fines", exc))
 
     if not sections:
         return None

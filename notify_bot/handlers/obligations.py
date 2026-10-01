@@ -13,12 +13,15 @@ vehicle_plate field to be filled via /enroll (or accept a plate argument).
 
 from __future__ import annotations
 
+import html
 import logging
 
 from telegram import Message, Update
 from telegram.ext import ContextTypes
 
-from notify_bot import db
+from notify_bot import config, db
+from notify_bot.dates import expiry_warning
+from notify_bot.errors import format_error
 from notify_bot.formatting import align_fields
 from notify_bot.middlewares import require_approved
 from notify_bot.payment_buttons import build_copy_keyboard
@@ -58,6 +61,27 @@ from notify_bot.updates import require
 logger = logging.getLogger(__name__)
 
 
+async def _reply_check_failed(
+    message: Message, uid: int, title: str, exc: Exception, footer: str = ""
+) -> None:
+    """Report a failed check — terse for regular users, with exception detail for debug users."""
+    await message.reply_html(
+        format_error(uid, f"{title}\n\n⚠️ Check failed — please try again later.{footer}", exc)
+    )
+
+
+_SOFIA_MANUAL_LINK = (
+    '\nCheck manually: <a href="https://www.sofiatraffic.bg/en/parking">sofiatraffic.bg/parking</a>'
+)
+
+
+def _debug_note(uid: int, note: str) -> str:
+    """Extra diagnostic line appended to a reply, shown only to debug users."""
+    if not config.is_debug_user(uid):
+        return ""
+    return f"\n\n🛠 <code>{html.escape(note)}</code>"
+
+
 async def _reply_with_obligations(message: Message, units: list[Obligation]) -> None:
     """Send an obligations check: one message per payable fine, each with its copy buttons."""
     for part in render_fine_messages(units):
@@ -89,7 +113,7 @@ async def driver_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         units = await check_by_licence(national_id=national_id, licence_number=licence)
     except MVRApiError as exc:
         logger.exception("MVR API error for user %s", uid)
-        await message.reply_text(f"⚠️ MVR API error: {exc}")
+        await _reply_check_failed(message, uid, "🪪 <b>Obligations by driving licence</b>", exc)
         return
 
     await _reply_with_obligations(message, units)
@@ -136,14 +160,21 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             logger.warning(
                 "Boleron vignette fallback also failed for user %s: %s", uid, boleron_exc
             )
-            await message.reply_html(
-                "⚠️ <b>Vignette check unavailable.</b>\n\n"
-                'Check manually: <a href="https://check.bgtoll.bg/">check.bgtoll.bg</a>'
+            await _reply_check_failed(
+                message,
+                uid,
+                f"🛣️ <b>Vignette for {plate}</b>",
+                boleron_exc,
+                '\nCheck manually: <a href="https://check.bgtoll.bg/">check.bgtoll.bg</a>'
+                + _debug_note(uid, f"bgtoll.bg failed first: {type(exc).__name__}: {exc}"),
             )
             return
+        fallback_note = _debug_note(
+            uid, f"Via boleron.bg — bgtoll.bg failed: {type(exc).__name__}: {exc}"
+        )
         if not bv.found:
             await message.reply_html(
-                f"🛣️ <b>Vignette for {plate}</b>\n\n❌ No active vignette found."
+                f"🛣️ <b>Vignette for {plate}</b>\n\n❌ No active vignette found.{fallback_note}"
             )
             return
         status_icon = "✅" if bv.active else "❌"
@@ -154,7 +185,9 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
         if bv.price:
             lines.append(f"💰 Price: {bv.price}")
-        await message.reply_html("\n".join(lines))
+        if warning := expiry_warning(bv.valid_to):
+            lines.append(warning)
+        await message.reply_html("\n".join(lines) + fallback_note)
         return
 
     if not info.found:
@@ -169,6 +202,8 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         lines.append(f"📋 Type: {info.vignette_type}")
     if info.emission_class:
         lines.append(f"🌿 Emission class: {info.emission_class}")
+    if warning := expiry_warning(info.validity_date_to):
+        lines.append(warning)
 
     await message.reply_html("\n".join(lines))
 
@@ -205,16 +240,11 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     try:
         info = await check_sticker(plate)
-    except SofiaCloudflareError:
-        await message.reply_html(
-            "⚠️ <b>Cloudflare blocked the request.</b>\n\n"
-            "Check manually: "
-            '<a href="https://www.sofiatraffic.bg/en/parking">sofiatraffic.bg/parking</a>'
+    except (SofiaCloudflareError, SofiaTrafficError) as exc:
+        logger.warning("Sofia Traffic sticker check failed for user %s: %s", uid, exc)
+        await _reply_check_failed(
+            message, uid, f"🅿️ <b>Parking sticker for {plate}</b>", exc, _SOFIA_MANUAL_LINK
         )
-        return
-    except SofiaTrafficError as exc:
-        logger.exception("Sofia Traffic API error for user %s", uid)
-        await message.reply_text(f"⚠️ Sofia Traffic service error: {exc}")
         return
 
     if not info.found:
@@ -270,16 +300,11 @@ async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         info = await check_clamp(plate)
-    except SofiaCloudflareError:
-        await message.reply_html(
-            "⚠️ <b>Cloudflare blocked the request.</b>\n\n"
-            "Check manually: "
-            '<a href="https://www.sofiatraffic.bg/en/parking">sofiatraffic.bg/parking</a>'
+    except (SofiaCloudflareError, SofiaTrafficError) as exc:
+        logger.warning("Sofia Traffic clamp check failed for user %s: %s", uid, exc)
+        await _reply_check_failed(
+            message, uid, f"🔒 <b>Wheel clamp for {plate}</b>", exc, _SOFIA_MANUAL_LINK
         )
-        return
-    except SofiaTrafficError as exc:
-        logger.exception("Sofia Traffic API error for user %s", uid)
-        await message.reply_text(f"⚠️ Sofia Traffic service error: {exc}")
         return
 
     if not info.found or not info.clamped:
@@ -322,7 +347,7 @@ async def plate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         units = await check_by_plate(national_id=national_id, plate_number=plate)
     except MVRApiError as exc:
         logger.exception("MVR API error for user %s", uid)
-        await message.reply_text(f"⚠️ MVR API error: {exc}")
+        await _reply_check_failed(message, uid, "🚗 <b>Obligations by vehicle plate</b>", exc)
         return
 
     await _reply_with_obligations(message, units)
@@ -362,7 +387,7 @@ async def gtp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         info = await check_gtp(plate)
     except BoleronError as exc:
         logger.exception("Boleron GTP error for user %s", uid)
-        await message.reply_text(f"⚠️ Service error: {exc}")
+        await _reply_check_failed(message, uid, f"🔧 <b>Technical Inspection for {plate}</b>", exc)
         return
 
     if not info.found:
@@ -371,9 +396,13 @@ async def gtp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
-    await message.reply_html(
-        f"🔧 <b>Technical Inspection for {plate}</b>\n✅ Valid until: <b>{info.valid_to}</b>"
-    )
+    lines = [
+        f"🔧 <b>Technical Inspection for {plate}</b>",
+        f"✅ Valid until: <b>{info.valid_to}</b>",
+    ]
+    if warning := expiry_warning(info.valid_to):
+        lines.append(warning)
+    await message.reply_html("\n".join(lines))
 
 
 # ── /mtpl ─────────────────────────────────────────────────────────────────────
@@ -410,7 +439,7 @@ async def mtpl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         info = await check_mtpl(plate)
     except BoleronError as exc:
         logger.exception("Boleron MTPL error for user %s", uid)
-        await message.reply_text(f"⚠️ Service error: {exc}")
+        await _reply_check_failed(message, uid, f"🛡️ <b>Civil Liability (MTPL) for {plate}</b>", exc)
         return
 
     status_icon = "✅" if info.active else "❌"
@@ -422,6 +451,8 @@ async def mtpl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         lines.append(f"🏢 Insurer: {info.insurer}")
     if info.valid_from and info.valid_to:
         lines.append(f"📅 Valid from: {info.valid_from} to {info.valid_to}")
+    if warning := expiry_warning(info.valid_to):
+        lines.append(warning)
 
     await message.reply_html("\n".join(lines))
 
@@ -451,7 +482,7 @@ async def fines_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         result = await check_fines(driver_licence_no=licence, egn=national_id)
     except BoleronError as exc:
         logger.exception("Boleron fines error for user %s", uid)
-        await message.reply_text(f"⚠️ Service error: {exc}")
+        await _reply_check_failed(message, uid, "🚔 <b>Traffic Fines</b>", exc)
         return
 
     if not result.has_fines:
@@ -505,7 +536,7 @@ async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     except BoleronError as exc:
         logger.warning("Boleron vehicleDataServices error for user %s: %s", uid, exc)
-        await message.reply_text(f"⚠️ Service error: {exc}")
+        await _reply_check_failed(message, uid, "🚗 <b>Vehicle data</b>", exc)
         return
 
     fields: list[tuple[str, str]] = []

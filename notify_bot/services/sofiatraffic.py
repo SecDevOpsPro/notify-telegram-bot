@@ -439,6 +439,12 @@ async def _request_sticker(client: httpx.AsyncClient, xsrf: str, plate: str) -> 
         resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
         raise SofiaTrafficError(f"API returned HTTP {resp.status_code}") from exc
+    # The origin answers a plate with no sticker with an empty 200 body (the
+    # site's own frontend treats a falsy response as "nothing found").  This
+    # is not a Cloudflare block: the clamp endpoint returns JSON in the same
+    # session.
+    if not resp.content:
+        return StickerInfo(plate=plate, found=False, raw={})
     return _parse_sticker(plate, _parse_json_response(resp))
 
 

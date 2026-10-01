@@ -249,7 +249,7 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if not info.found:
         await message.reply_html(
-            f"🅿️ <b>Parking sticker for {plate}</b>\n\n❌ No active parking sticker found."
+            f"🅿️ <b>Parking sticker for {plate}</b>\n\n✅ No active parking sticker found."
         )
         return
 

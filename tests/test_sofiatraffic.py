@@ -210,6 +210,17 @@ class TestCheckSticker:
             result = await check_sticker("CB1234AB")
         assert result.found is False
 
+    async def test_empty_200_returns_not_found(self):
+        resp = httpx.Response(200, content=b"", headers={"Content-Type": "text/html"})
+        resp.request = httpx.Request("GET", "https://www.sofiatraffic.bg/bg/parking/sticker/TEST")
+        with patch(
+            "notify_bot.services.sofiatraffic._get_csrf_client",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(get=AsyncMock(return_value=resp), aclose=AsyncMock()), "token"),
+        ):
+            result = await check_sticker("CB1234AB")
+        assert result.found is False
+
     async def test_cloudflare_403_raises(self):
         resp = _make_response(403)
         with patch(

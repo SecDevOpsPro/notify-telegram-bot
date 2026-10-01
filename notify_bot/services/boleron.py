@@ -5,7 +5,7 @@ The API is protected by Firebase anonymous authentication (project boleron-50414
 A token is obtained once and cached until near-expiry (~1 hour TTL), then refreshed.
 
 Endpoints used:
-  GET /boleron/external/gtp?carNo=<plate>           — technical inspection validity
+  GET /boleron/external/gtp?carNo=<plate>&talonNo=<t> — technical inspection validity
   GET /boleron/external/goAutoService?carNo=<plate> — MTPL civil liability insurance
   GET /boleron/external/vignette?carNo=<plate>      — road e-vignette
   GET /boleron/external/fines?driverLicenseNo=<l>&egn=<e> — traffic fines
@@ -225,9 +225,9 @@ class FinesResult:
 # ── Public API calls ──────────────────────────────────────────────────────────
 
 
-async def check_gtp(car_no: str) -> GtpInfo:
-    """Check technical inspection validity for `car_no`."""
-    data = await _get("gtp", {"carNo": car_no})
+async def check_gtp(*, car_no: str, talon_no: str) -> GtpInfo:
+    """Check technical inspection validity for `car_no` (the API also requires its talon number)."""
+    data = await _get("gtp", {"carNo": car_no, "talonNo": talon_no})
     if not data.get("result"):
         return GtpInfo(found=False)
     return GtpInfo(

@@ -360,31 +360,39 @@ async def plate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def gtp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check technical inspection (ГТП) validity via boleron.bg.
 
-    Usage: /gtp          — uses the plate stored via /enroll
-           /gtp CB1234AB — check an ad-hoc plate
+    The API needs the talon (small registration card) number alongside the plate.
+
+    Usage: /gtp                    — uses the plate and talon stored via /enroll
+           /gtp CB1234AB 009999999 — check an ad-hoc plate + talon
+           /gtp CB1234AB           — only if it's your enrolled plate (uses its stored talon)
     """
     message = require(update.message, "message")
     uid = require(update.effective_user, "effective_user").id
 
-    plate: str | None = None
-    if context.args:
-        plate = context.args[0].strip().upper()
+    args = context.args or []
+    plate: str | None = args[0].strip().upper() if args else None
+    talon: str | None = args[1].strip() if len(args) > 1 else None
 
-    if not plate:
+    if not plate or not talon:
         profile = await db.get_profile(uid)
-        plate = profile.get("vehicle_plate") if profile else None
+        enrolled_plate = profile.get("vehicle_plate") if profile else None
+        if not plate:
+            plate = enrolled_plate
+        if plate and plate == enrolled_plate and profile:
+            talon = profile.get("talon_no")
 
-    if not plate:
+    if not plate or not talon:
         await message.reply_html(
-            "⚠️ <b>No plate found.</b>\n\n"
-            "Use <code>/gtp CB1234AB</code> or save your plate with /enroll."
+            "⚠️ <b>Plate and talon number needed.</b>\n\n"
+            "The technical inspection check requires both. Use "
+            "<code>/gtp CB1234AB 009999999</code> or save them with /enroll."
         )
         return
 
     await message.reply_text(f"🔍 Checking technical inspection for {plate}…")
 
     try:
-        info = await check_gtp(plate)
+        info = await check_gtp(car_no=plate, talon_no=talon)
     except BoleronError as exc:
         logger.exception("Boleron GTP error for user %s", uid)
         await _reply_check_failed(message, uid, f"🔧 <b>Technical Inspection for {plate}</b>", exc)

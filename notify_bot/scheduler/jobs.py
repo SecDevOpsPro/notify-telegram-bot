@@ -145,6 +145,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
     national_id: str | None = user.get("national_id")
     licence: str | None = user.get("driving_licence")
     plate: str | None = user.get("vehicle_plate")
+    talon: str | None = user.get("talon_no")
 
     sections: list[str] = []
     licence_units: list[Obligation] = []  # decide which /driver, /plate buttons the report gets
@@ -262,26 +263,23 @@ async def _build_report(user: ReportTarget) -> _Report | None:
             )
 
     if plate:
-        await asyncio.sleep(_INTER_CHECK_DELAY)
-        try:
-            gtp = await _retry(check_gtp, plate)
-            if gtp.found:
-                gtp_lines = [
-                    f"🔧 <b>Technical Inspection ({plate}):</b>",
-                    f"✅ Valid until: {gtp.valid_to}",
-                ]
-                if warning := expiry_warning(gtp.valid_to):
-                    gtp_lines.append(warning)
-                sections.append("\n".join(gtp_lines))
-            else:
-                sections.append(
-                    f"🔧 <b>Technical Inspection ({plate}):</b>\n❌ No valid inspection found."
-                )
-        except BoleronError as exc:
-            logger.warning("GTP check failed for user %s: %s", uid, exc)
-            sections.append(
-                _check_failed(uid, f"🔧 <b>Technical Inspection ({plate}):</b>", "gtp", exc)
-            )
+        gtp_title = f"🔧 <b>Technical Inspection ({plate}):</b>"
+        if not talon:
+            sections.append(f"{gtp_title}\n⚠️ Talon number missing — save it with /enroll.")
+        else:
+            await asyncio.sleep(_INTER_CHECK_DELAY)
+            try:
+                gtp = await _retry(check_gtp, car_no=plate, talon_no=talon)
+                if gtp.found:
+                    gtp_lines = [gtp_title, f"✅ Valid until: {gtp.valid_to}"]
+                    if warning := expiry_warning(gtp.valid_to):
+                        gtp_lines.append(warning)
+                    sections.append("\n".join(gtp_lines))
+                else:
+                    sections.append(f"{gtp_title}\n❌ No valid inspection found.")
+            except BoleronError as exc:
+                logger.warning("GTP check failed for user %s: %s", uid, exc)
+                sections.append(_check_failed(uid, gtp_title, "gtp", exc))
         await asyncio.sleep(_INTER_CHECK_DELAY)
 
         try:

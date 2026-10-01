@@ -275,3 +275,51 @@ async def test_command_warns_about_upcoming_expiry(handler, check, result):
 async def test_gtp_no_warning_when_far_from_expiry():
     text = await _run_ok(gtp_command, "check_gtp", GtpInfo(found=True, valid_to=_soon(60)))
     assert "Expires in" not in text
+
+
+# ── /gtp plate + talon resolution ────────────────────────────────────────────
+
+
+async def _run_gtp(args: list[str], profile: dict | None) -> tuple[MagicMock, AsyncMock]:
+    update = _update()
+    check = AsyncMock(return_value=GtpInfo(found=False))
+    with (
+        patch(
+            "notify_bot.middlewares.db.get_user", new=AsyncMock(return_value={"status": "approved"})
+        ),
+        patch(
+            "notify_bot.handlers.obligations.db.get_profile", new=AsyncMock(return_value=profile)
+        ),
+        patch("notify_bot.handlers.obligations.check_gtp", new=check),
+    ):
+        await gtp_command(update, MagicMock(args=args))
+    return update, check
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        ([], ("XH2856", "009999999")),  # enrolled plate + talon
+        (["xh2856"], ("XH2856", "009999999")),  # own plate → stored talon
+        (["CB1111AA", "001234567"], ("CB1111AA", "001234567")),  # ad-hoc pair
+    ],
+)
+@pytest.mark.asyncio
+async def test_gtp_resolves_plate_and_talon(args, expected):
+    _, check = await _run_gtp(args, _PROFILE)
+    check.assert_awaited_once_with(car_no=expected[0], talon_no=expected[1])
+
+
+@pytest.mark.parametrize(
+    ("args", "profile"),
+    [
+        (["CB1111AA"], _PROFILE),  # someone else's plate, no talon given
+        ([], {**_PROFILE, "talon_no": None}),  # enrolled without a talon
+        ([], None),  # not enrolled at all
+    ],
+)
+@pytest.mark.asyncio
+async def test_gtp_asks_for_talon_when_missing(args, profile):
+    update, check = await _run_gtp(args, profile)
+    check.assert_not_awaited()
+    assert "talon" in update.message.reply_html.call_args.args[0]

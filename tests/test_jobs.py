@@ -33,6 +33,7 @@ _FULL_USER = {
     "national_id": "1234567890",
     "driving_licence": "123456789",
     "vehicle_plate": PLATE,
+    "talon_no": "009999999",
 }
 
 
@@ -530,3 +531,23 @@ async def test_daily_obligations_report_schedules_one_job_per_user():
     assert context.job_queue.run_once.call_count == 2
     names = {call.kwargs["name"] for call in context.job_queue.run_once.call_args_list}
     assert names == {"report_user_1", "report_user_2"}
+
+
+@pytest.mark.asyncio
+async def test_gtp_passes_plate_and_talon():
+    gtp = AsyncMock(return_value=GtpInfo(found=False))
+    with _patched(gtp=gtp):
+        await _report_text(_FULL_USER)
+    gtp.assert_awaited_once_with(car_no=PLATE, talon_no="009999999")
+
+
+@pytest.mark.asyncio
+async def test_gtp_without_talon_shows_section_asking_for_it():
+    gtp = AsyncMock()
+    with _patched(gtp=gtp):
+        message = await _report_text({**_FULL_USER, "talon_no": None})
+    gtp.assert_not_awaited()
+    assert (
+        f"🔧 <b>Technical Inspection ({PLATE}):</b>\n⚠️ Talon number missing — save it with /enroll."
+        in message
+    )

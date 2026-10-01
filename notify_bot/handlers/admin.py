@@ -264,6 +264,7 @@ async def brief_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "national_id": profile.get("national_id"),
         "driving_licence": profile.get("driving_licence"),
         "vehicle_plate": profile.get("vehicle_plate"),
+        "talon_no": profile.get("talon_no"),
     }
 
     await message.reply_text(f"⏳ Running report for <code>{target_id}</code>…", parse_mode="HTML")

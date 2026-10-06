@@ -53,7 +53,7 @@ from notify_bot.services.sofiatraffic import (
 )
 from notify_bot.services.sofiatraffic import (
     SofiaTrafficError,
-    check_sticker_and_clamp,
+    check_clamp,
 )
 from notify_bot.updates import MissingUpdateFieldError, require
 
@@ -137,8 +137,13 @@ async def _build_report(user: ReportTarget) -> _Report | None:
     Run all obligation checks for one user and compose their report.
 
     Every check that applies to the user gets a section, whether it came back
-    clean, with findings, or failed.  Returns ``None`` only when the user has
-    no profile data that any check applies to.
+    clean, with findings, or failed — except the MVR licence/plate and wheel
+    clamp checks, which only appear when they find something or fail.  The
+    parking sticker isn't checked at all: sofiatraffic.bg misses active
+    stickers too often for an unprompted report (/sticker still offers it).
+    Sections follow the order the checks run in: fines, the MVR obligation
+    details, inspection, MTPL, vignette, then wheel clamp.  Returns ``None``
+    only when the user has no profile data that any check applies to.
     """
     uid: int = user["user_id"]
     name: str = user.get("first_name") or "there"
@@ -151,29 +156,100 @@ async def _build_report(user: ReportTarget) -> _Report | None:
     licence_units: list[Obligation] = []  # decide which /driver, /plate buttons the report gets
     plate_units: list[Obligation] = []
 
+    calls_made = False
+
+    async def pause() -> None:
+        """Space out API calls: sleep before every call but the first."""
+        nonlocal calls_made
+        if calls_made:
+            await asyncio.sleep(_INTER_CHECK_DELAY)
+        calls_made = True
+
     if national_id and licence:
         try:
+            await pause()
+            fines = await _retry(check_fines, driver_licence_no=licence, egn=national_id)
+            if fines.has_fines:
+                sym = fines.currency_symbol
+                fines_lines = [
+                    "🚔 <b>Traffic Fines:</b>",
+                    f"❌ {fines.count} fine(s) — Total: {fines.total:.2f} {sym}",
+                ]
+                if fines.total_discount > 0:
+                    fines_lines.append(f"💸 With discount: {fines.total_discount:.2f} {sym}")
+                fines_section = "\n".join(fines_lines)
+            else:
+                fines_section = "🚔 <b>Traffic Fines:</b>\n✅ No fines."
+        except BoleronError as exc:
+            logger.warning("Fines check failed for user %s: %s", uid, exc)
+            fines_section = _check_failed(uid, "🚔 <b>Traffic Fines:</b>", "fines", exc)
+        sections.append(fines_section)
+
+    if national_id and licence:
+        try:
+            await pause()
             units = await _retry(check_by_licence, national_id=national_id, licence_number=licence)
-            sections.append("🪪 <b>By driving licence:</b>\n" + render_obligations(units))
+            if any(unit.has_obligations for unit in units):
+                sections.append("🪪 <b>By driving licence:</b>\n" + render_obligations(units))
             licence_units = units
         except MVRApiError as exc:
             logger.warning("Licence check failed for user %s: %s", uid, exc)
             sections.append(_check_failed(uid, "🪪 <b>By driving licence:</b>", "driver", exc))
-        if plate:  # only pause if plate-based checks follow
-            await asyncio.sleep(_INTER_CHECK_DELAY)
 
     if national_id and plate:
         try:
+            await pause()
             units = await _retry(check_by_plate, national_id=national_id, plate_number=plate)
-            sections.append("🚗 <b>By vehicle plate (MVR):</b>\n" + render_obligations(units))
+            if any(unit.has_obligations for unit in units):
+                sections.append("🚗 <b>By vehicle plate (MVR):</b>\n" + render_obligations(units))
             plate_units = units
         except MVRApiError as exc:
             logger.warning("Plate check failed for user %s: %s", uid, exc)
             sections.append(_check_failed(uid, "🚗 <b>By vehicle plate (MVR):</b>", "plate", exc))
-        await asyncio.sleep(_INTER_CHECK_DELAY)
+
+    if plate:
+        gtp_title = f"🔧 <b>Technical Inspection ({plate}):</b>"
+        if not talon:
+            sections.append(f"{gtp_title}\n⚠️ Talon number missing — save it with /enroll.")
+        else:
+            try:
+                await pause()
+                gtp = await _retry(check_gtp, car_no=plate, talon_no=talon)
+                if gtp.found:
+                    gtp_lines = [gtp_title, f"✅ Valid until: {gtp.valid_to}"]
+                    if warning := expiry_warning(gtp.valid_to):
+                        gtp_lines.append(warning)
+                    sections.append("\n".join(gtp_lines))
+                else:
+                    sections.append(f"{gtp_title}\n❌ No valid inspection found.")
+            except BoleronError as exc:
+                logger.warning("GTP check failed for user %s: %s", uid, exc)
+                sections.append(_check_failed(uid, gtp_title, "gtp", exc))
+
+        try:
+            await pause()
+            mtpl = await _retry(check_mtpl, plate)
+            status_icon = "✅" if mtpl.active else "❌"
+            mtpl_lines = [
+                f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>",
+                f"{status_icon} {'Active' if mtpl.active else 'No active policy'}",
+            ]
+            if mtpl.insurer:
+                mtpl_lines.append(f"🏢 {mtpl.insurer}")
+            if mtpl.valid_to:
+                mtpl_lines.append(f"📅 Valid until: {mtpl.valid_to}")
+            if warning := expiry_warning(mtpl.valid_to):
+                mtpl_lines.append(warning)
+            sections.append("\n".join(mtpl_lines))
+        except BoleronError as exc:
+            logger.warning("MTPL check failed for user %s: %s", uid, exc)
+            sections.append(
+                _check_failed(uid, f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>", "mtpl", exc)
+            )
 
     if plate:
         try:
+            await pause()
             vignette = await _retry(check_vignette, plate, skip_on=(CloudflareBlockedError,))
             if vignette.found:
                 status_icon = "✅" if vignette.is_valid else "❌"
@@ -220,24 +296,11 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 sections.append(
                     _check_failed(uid, f"🛣️ <b>Vignette ({plate}):</b>", "vignette", exc)
                 )
-        await asyncio.sleep(_INTER_CHECK_DELAY)
 
     if plate:
         try:
-            sticker, clamp = await _retry(
-                check_sticker_and_clamp, plate, skip_on=(SofiaCloudflareError,)
-            )
-            if sticker.found:
-                status_icon = "✅" if sticker.is_valid else "❌"
-                sticker_lines = [f"🅿️ <b>Parking sticker ({plate}):</b>"]
-                sticker_lines.append(f"{status_icon} Status: {sticker.status or 'Active'}")
-                if sticker.valid_from:
-                    sticker_lines.append(f"📅 Valid: {sticker.valid_from} → {sticker.valid_to}")
-                if sticker.zone:
-                    sticker_lines.append(f"📍 Zone: {sticker.zone}")
-                sections.append("\n".join(sticker_lines))
-            else:
-                sections.append(f"🅿️ <b>Parking sticker ({plate}):</b>\n✅ No sticker found.")
+            await pause()
+            clamp = await _retry(check_clamp, plate, skip_on=(SofiaCloudflareError,))
             if clamp.found and clamp.clamped:
                 clamp_lines = [
                     f"🔒 <b>Wheel clamp ({plate}):</b>",
@@ -248,78 +311,9 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 if clamp.location:
                     clamp_lines.append(f"📍 Location: {clamp.location}")
                 sections.append("\n".join(clamp_lines))
-            else:
-                sections.append(f"🔒 <b>Wheel clamp ({plate}):</b>\n✅ Not clamped.")
         except (SofiaCloudflareError, SofiaTrafficError) as exc:
-            logger.warning("Sticker/clamp check failed for user %s: %s", uid, exc)
-            # One lookup feeds both results, so one failure section (and one error detail).
-            sections.append(
-                format_error(
-                    uid,
-                    f"🅿️ <b>Parking sticker / wheel clamp ({plate}):</b>\n"
-                    "⚠️ Check failed — try /sticker or /clamp later.",
-                    exc,
-                )
-            )
-
-    if plate:
-        gtp_title = f"🔧 <b>Technical Inspection ({plate}):</b>"
-        if not talon:
-            sections.append(f"{gtp_title}\n⚠️ Talon number missing — save it with /enroll.")
-        else:
-            await asyncio.sleep(_INTER_CHECK_DELAY)
-            try:
-                gtp = await _retry(check_gtp, car_no=plate, talon_no=talon)
-                if gtp.found:
-                    gtp_lines = [gtp_title, f"✅ Valid until: {gtp.valid_to}"]
-                    if warning := expiry_warning(gtp.valid_to):
-                        gtp_lines.append(warning)
-                    sections.append("\n".join(gtp_lines))
-                else:
-                    sections.append(f"{gtp_title}\n❌ No valid inspection found.")
-            except BoleronError as exc:
-                logger.warning("GTP check failed for user %s: %s", uid, exc)
-                sections.append(_check_failed(uid, gtp_title, "gtp", exc))
-        await asyncio.sleep(_INTER_CHECK_DELAY)
-
-        try:
-            mtpl = await _retry(check_mtpl, plate)
-            status_icon = "✅" if mtpl.active else "❌"
-            mtpl_lines = [
-                f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>",
-                f"{status_icon} {'Active' if mtpl.active else 'No active policy'}",
-            ]
-            if mtpl.insurer:
-                mtpl_lines.append(f"🏢 {mtpl.insurer}")
-            if mtpl.valid_to:
-                mtpl_lines.append(f"📅 Valid until: {mtpl.valid_to}")
-            if warning := expiry_warning(mtpl.valid_to):
-                mtpl_lines.append(warning)
-            sections.append("\n".join(mtpl_lines))
-        except BoleronError as exc:
-            logger.warning("MTPL check failed for user %s: %s", uid, exc)
-            sections.append(
-                _check_failed(uid, f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>", "mtpl", exc)
-            )
-
-    if national_id and licence:
-        await asyncio.sleep(_INTER_CHECK_DELAY)
-        try:
-            fines = await _retry(check_fines, driver_licence_no=licence, egn=national_id)
-            if fines.has_fines:
-                sym = fines.currency_symbol
-                fines_lines = [
-                    "🚔 <b>Traffic Fines:</b>",
-                    f"❌ {fines.count} fine(s) — Total: {fines.total:.2f} {sym}",
-                ]
-                if fines.total_discount > 0:
-                    fines_lines.append(f"💸 With discount: {fines.total_discount:.2f} {sym}")
-                sections.append("\n".join(fines_lines))
-            else:
-                sections.append("🚔 <b>Traffic Fines:</b>\n✅ No fines.")
-        except BoleronError as exc:
-            logger.warning("Fines check failed for user %s: %s", uid, exc)
-            sections.append(_check_failed(uid, "🚔 <b>Traffic Fines:</b>", "fines", exc))
+            logger.warning("Clamp check failed for user %s: %s", uid, exc)
+            sections.append(_check_failed(uid, f"🔒 <b>Wheel clamp ({plate}):</b>", "clamp", exc))
 
     if not sections:
         return None

@@ -18,7 +18,8 @@ stored profile (national ID, driving licence, vehicle plate).
 - **Wheel-clamp check** — check whether your car is clamped in Sofia.
 - **EUR exchange rates** — live CambioCuba rates (public, no approval needed).
 - **Daily scheduled report** — automatic morning check of obligations,
-  vignette, sticker, and clamp status for all approved users.
+  vignette, and clamp status for all approved users (the parking sticker is
+  left out because sofiatraffic.bg misses active stickers — use `/sticker`).
 
 ---
 

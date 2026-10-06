@@ -516,26 +516,3 @@ async def check_clamp(plate: str) -> ClampInfo:
         return await _request_clamp(client, xsrf, plate)
     finally:
         await client.aclose()
-
-
-async def check_sticker_and_clamp(plate: str) -> tuple[StickerInfo, ClampInfo]:
-    """
-    Check sticker and clamp status together using a single CSRF session fetch.
-
-    Avoids the double page-load overhead of calling :func:`check_sticker` and
-    :func:`check_clamp` back-to-back (e.g. in the daily scheduled report).
-
-    Raises:
-        :class:`CloudflareError`:  when Cloudflare challenges any request.
-        :class:`CsrfFetchError`:   when the CSRF token cannot be obtained.
-        :class:`SofiaTrafficError`: on any other HTTP or connection error.
-    """
-    plate = plate.upper()
-    logger.debug("Combined sticker+clamp check for %s", plate)
-    client, xsrf = await _get_csrf_client()
-    try:
-        sticker = await _request_sticker(client, xsrf, plate)
-        clamp = await _request_clamp(client, xsrf, plate)
-    finally:
-        await client.aclose()
-    return sticker, clamp

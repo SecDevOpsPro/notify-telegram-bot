@@ -70,6 +70,15 @@ async def _reply_check_failed(
     )
 
 
+# sofiatraffic.bg sometimes gives a negative answer when the opposite is true,
+# so "no sticker" / "not clamped" replies carry a warning instead of reading as final.
+_SOFIA_UNRELIABLE_WARNING = (
+    "⚠️ <i>sofiatraffic.bg is unreliable and may show no sticker even when an active one exists.</i>"
+)
+_SOFIA_CLAMP_UNRELIABLE_WARNING = (
+    "⚠️ <i>sofiatraffic.bg is unreliable and may show a vehicle as not clamped even when it is.</i>"
+)
+
 _SOFIA_MANUAL_LINK = (
     '\nCheck manually: <a href="https://www.sofiatraffic.bg/en/parking">sofiatraffic.bg/parking</a>'
 )
@@ -249,7 +258,8 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if not info.found:
         await message.reply_html(
-            f"🅿️ <b>Parking sticker for {plate}</b>\n\n✅ No active parking sticker found."
+            f"🅿️ <b>Parking sticker for {plate}</b>\n\n"
+            f"✅ No active parking sticker found.\n\n{_SOFIA_UNRELIABLE_WARNING}"
         )
         return
 
@@ -309,7 +319,8 @@ async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if not info.found or not info.clamped:
         await message.reply_html(
-            f"🔓 <b>Wheel clamp for {plate}</b>\n\n✅ Vehicle is <b>not</b> wheel-clamped."
+            f"🔓 <b>Wheel clamp for {plate}</b>\n\n✅ Vehicle is <b>not</b> wheel-clamped.\n\n"
+            f"{_SOFIA_CLAMP_UNRELIABLE_WARNING}"
         )
         return
 

@@ -80,6 +80,12 @@ def test_days_until_none_when_unparseable():
 def test_expiry_warning_within_threshold():
     assert expiry_warning(_in(1)) == "⚠️ Expires in 1 day!"
     assert expiry_warning(_in(3)) == "⚠️ Expires in 3 days!"
+    # Not rounded up to "in 2 weeks" just under the threshold.
+    assert expiry_warning(_in(EXPIRY_WARN_DAYS - 1)) == f"⚠️ Expires in {EXPIRY_WARN_DAYS - 1} days!"
+
+
+def test_expiry_warning_on_last_day():
+    assert expiry_warning(_in(0)) == "⚠️ Expires today!"
 
 
 def test_expiry_warning_none_outside_threshold():

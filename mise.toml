@@ -37,6 +37,11 @@ description = "Run the formatter"
 alias = "f"
 run = ["uv run ruff format ."]
 
+[tasks.lint]
+description = "Format, then lint with safe auto-fixes"
+alias = "l"
+run = ["uv run ruff format .", "uv run ruff check --fix ."]
+
 [tasks.upgrade]
 description = "Upgrade dependencies"
 alias = "pu"

@@ -30,7 +30,8 @@ uv run ruff check .                  # lint
 uv run mypy notify_bot               # type-check
 ```
 
-Equivalent `mise` tasks exist: `mise run tests`, `mise run format`, `mise run typecheck`.
+Equivalent `mise` tasks exist: `mise run tests`, `mise run format`, `mise run lint`
+(format + `ruff check --fix`), `mise run typecheck`.
 
 Required env vars for local runs: `TOKEN`, `ADMIN_TELEGRAM_ID`. See
 `notify_bot/config.py` for the full list (all config is env-var driven,

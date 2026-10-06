@@ -26,7 +26,7 @@ from notify_bot.services.boleron import (
     MtplInfo,
 )
 from notify_bot.services.mvr import MVRApiError, Obligation
-from notify_bot.services.sofiatraffic import SofiaTrafficError
+from notify_bot.services.sofiatraffic import ClampInfo, SofiaTrafficError, StickerInfo
 
 _PROFILE = {
     "national_id": "1234567890",
@@ -323,3 +323,20 @@ async def test_gtp_asks_for_talon_when_missing(args, profile):
     update, check = await _run_gtp(args, profile)
     check.assert_not_awaited()
     assert "talon" in update.message.reply_html.call_args.args[0]
+
+
+# ── /sticker not-found result ────────────────────────────────────────────────
+
+
+async def test_sticker_not_found_warns_source_is_unreliable():
+    text = await _run_ok(sticker_command, "check_sticker", StickerInfo(plate="XH2856"))
+    assert "No active parking sticker found." in text
+    assert "unreliable" in text
+    assert "Check manually" not in text  # the site itself gives the same wrong answer
+
+
+async def test_clamp_not_clamped_warns_source_is_unreliable():
+    text = await _run_ok(clamp_command, "check_clamp", ClampInfo(plate="XH2856"))
+    assert "not</b> wheel-clamped" in text
+    assert "unreliable" in text
+    assert "Check manually" not in text

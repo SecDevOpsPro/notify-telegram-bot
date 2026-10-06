@@ -18,6 +18,8 @@ dependencies = [
   "aiosqlite>=0.20",
   # Async HTTP client (replaces requests — avoids blocking the event loop)
   "httpx[http2]>=0.28",
+  # Locale-aware date formatting ("in 4 days")
+  "babel>=2.18.0",
   # Templating
   "jinja2>=3.1",
   # Telegram bot framework

@@ -23,7 +23,7 @@ from notify_bot.services.boleron import (
     MtplInfo,
 )
 from notify_bot.services.mvr import MVRApiError, Obligation
-from notify_bot.services.sofiatraffic import ClampInfo, SofiaTrafficError, StickerInfo
+from notify_bot.services.sofiatraffic import ClampInfo, SofiaTrafficError
 
 PLATE = "XH2856"
 
@@ -94,7 +94,6 @@ async def test_retry_does_not_retry_skip_on_exceptions():
 # ── _build_report: defaults + patch helper ──────────────────────────
 
 _DEFAULT_VIGNETTE = VignetteInfo(plate=PLATE, country="BG", found=False)
-_DEFAULT_STICKER = StickerInfo(plate=PLATE, found=False)
 _DEFAULT_CLAMP = ClampInfo(plate=PLATE, found=False)
 _DEFAULT_GTP = GtpInfo(found=False)
 _DEFAULT_MTPL = MtplInfo(active=False)
@@ -108,7 +107,7 @@ def _patched(**overrides):
     "nothing found" default, then apply per-test overrides on top.
 
     ``overrides`` maps a short name (licence, plate, vignette, vignette_boleron,
-    sticker_and_clamp, gtp, mtpl, fines) to the mock that should replace the
+    clamp, gtp, mtpl, fines) to the mock that should replace the
     default for that check.
     """
     targets = {
@@ -122,9 +121,9 @@ def _patched(**overrides):
             "notify_bot.scheduler.jobs.check_vignette_boleron",
             AsyncMock(return_value=BoleronVignetteInfo(found=False)),
         ),
-        "sticker_and_clamp": (
-            "notify_bot.scheduler.jobs.check_sticker_and_clamp",
-            AsyncMock(return_value=(_DEFAULT_STICKER, _DEFAULT_CLAMP)),
+        "clamp": (
+            "notify_bot.scheduler.jobs.check_clamp",
+            AsyncMock(return_value=_DEFAULT_CLAMP),
         ),
         "gtp": ("notify_bot.scheduler.jobs.check_gtp", AsyncMock(return_value=_DEFAULT_GTP)),
         "mtpl": ("notify_bot.scheduler.jobs.check_mtpl", AsyncMock(return_value=_DEFAULT_MTPL)),
@@ -167,7 +166,21 @@ async def test_report_greets_with_fallback_name_when_missing():
 
 
 @pytest.mark.asyncio
-async def test_licence_obligations_section_included_on_success():
+async def test_licence_obligations_section_included_when_obligations_found():
+    units = [
+        Obligation(
+            unit_group=1,
+            unit_group_label="Road Traffic Act and/or Insurance Code",
+            obligations=["Unpaid fine"],
+        )
+    ]
+    with _patched(licence=AsyncMock(return_value=units)):
+        message = await _report_text(_FULL_USER)
+    assert "🪪 <b>By driving licence:</b>" in message
+
+
+@pytest.mark.asyncio
+async def test_licence_obligations_section_hidden_when_clean():
     units = [
         Obligation(
             unit_group=1, unit_group_label="Road Traffic Act and/or Insurance Code", obligations=[]
@@ -175,7 +188,7 @@ async def test_licence_obligations_section_included_on_success():
     ]
     with _patched(licence=AsyncMock(return_value=units)):
         message = await _report_text(_FULL_USER)
-    assert "🪪 <b>By driving licence:</b>" in message
+    assert "🪪 <b>By driving licence:</b>" not in message
 
 
 @pytest.mark.asyncio
@@ -186,7 +199,21 @@ async def test_licence_check_failure_shows_error_line():
 
 
 @pytest.mark.asyncio
-async def test_plate_obligations_section_included_on_success():
+async def test_plate_obligations_section_included_when_obligations_found():
+    units = [
+        Obligation(
+            unit_group=1,
+            unit_group_label="Road Traffic Act and/or Insurance Code",
+            obligations=["Unpaid fine"],
+        )
+    ]
+    with _patched(plate=AsyncMock(return_value=units)):
+        message = await _report_text(_FULL_USER)
+    assert "🚗 <b>By vehicle plate (MVR):</b>" in message
+
+
+@pytest.mark.asyncio
+async def test_plate_obligations_section_hidden_when_clean():
     units = [
         Obligation(
             unit_group=1, unit_group_label="Road Traffic Act and/or Insurance Code", obligations=[]
@@ -194,7 +221,7 @@ async def test_plate_obligations_section_included_on_success():
     ]
     with _patched(plate=AsyncMock(return_value=units)):
         message = await _report_text(_FULL_USER)
-    assert "🚗 <b>By vehicle plate (MVR):</b>" in message
+    assert "🚗 <b>By vehicle plate (MVR):</b>" not in message
 
 
 @pytest.mark.asyncio
@@ -259,67 +286,43 @@ async def test_vignette_bgtoll_error_falls_back_to_boleron_not_found():
     assert f"🛣️ <b>Vignette ({PLATE}):</b>\n❌ No active vignette found." in message
 
 
-# ── Parking sticker / wheel clamp sections ───────────────────────────────────
+# ── Wheel clamp section (parking sticker is not part of the report) ──────────
 
 
 @pytest.mark.asyncio
-async def test_report_shows_parking_sticker_section_when_not_found():
-    with _patched():
+async def test_report_never_includes_parking_sticker():
+    with (
+        _patched(),
+        patch("notify_bot.services.sofiatraffic.check_sticker", new=AsyncMock()) as sticker,
+    ):
         message = await _report_text(_FULL_USER)
-    assert f"🅿️ <b>Parking sticker ({PLATE}):</b>\n✅ No sticker found." in message
+    assert "Parking sticker" not in message
+    sticker.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_report_includes_parking_sticker_section_when_found():
-    sticker = StickerInfo(
-        plate=PLATE,
-        found=True,
-        status="Active",
-        valid_from="01.01.2026",
-        valid_to="31.12.2026",
-        zone="A",
-    )
-    with _patched(sticker_and_clamp=AsyncMock(return_value=(sticker, _DEFAULT_CLAMP))):
-        message = await _report_text(_FULL_USER)
-    assert f"🅿️ <b>Parking sticker ({PLATE}):</b>" in message
-    assert "✅ Status: Active" in message
-    assert "📅 Valid: 01.01.2026 → 31.12.2026" in message
-    assert "📍 Zone: A" in message
-
-
-@pytest.mark.asyncio
-async def test_report_shows_wheel_clamp_section_when_not_clamped():
+async def test_report_hides_wheel_clamp_section_when_not_clamped():
     clamp = ClampInfo(plate=PLATE, found=True, clamped=False)
-    with _patched(sticker_and_clamp=AsyncMock(return_value=(_DEFAULT_STICKER, clamp))):
+    with _patched(clamp=AsyncMock(return_value=clamp)):
         message = await _report_text(_FULL_USER)
-    assert f"🔒 <b>Wheel clamp ({PLATE}):</b>\n✅ Not clamped." in message
+    assert "Wheel clamp" not in message
 
 
 @pytest.mark.asyncio
 async def test_report_includes_wheel_clamp_section_when_clamped():
     clamp = ClampInfo(plate=PLATE, found=True, clamped=True, clamped_at="10:00", location="Main St")
-    with _patched(sticker_and_clamp=AsyncMock(return_value=(_DEFAULT_STICKER, clamp))):
+    with _patched(clamp=AsyncMock(return_value=clamp)):
         message = await _report_text(_FULL_USER)
     assert f"🔒 <b>Wheel clamp ({PLATE}):</b>" in message
     assert "❌ Vehicle <b>IS wheel-clamped!</b>" in message
 
 
 @pytest.mark.asyncio
-async def test_sticker_clamp_error_shows_one_failed_section():
-    with _patched(sticker_and_clamp=AsyncMock(side_effect=SofiaTrafficError("blocked"))):
+async def test_clamp_error_shows_failed_section():
+    with _patched(clamp=AsyncMock(side_effect=SofiaTrafficError("blocked"))):
         message = await _report_text(_FULL_USER)
-    assert f"🅿️ <b>Parking sticker / wheel clamp ({PLATE}):</b>\n⚠️ Check failed" in message
+    assert f"🔒 <b>Wheel clamp ({PLATE}):</b>\n⚠️ Check failed — try /clamp later." in message
     assert message.count("Check failed") == 1
-
-
-@pytest.mark.asyncio
-async def test_sticker_clamp_error_detail_shown_once_to_debug_users():
-    with (
-        _patched(sticker_and_clamp=AsyncMock(side_effect=SofiaTrafficError("blocked"))),
-        patch("notify_bot.errors.config.is_debug_user", return_value=True),
-    ):
-        message = await _report_text(_FULL_USER)
-    assert message.count("SofiaTrafficError: blocked") == 1
 
 
 # ── Technical Inspection (GTP) section ───────────────────────────────────────
@@ -381,6 +384,36 @@ async def test_mtpl_error_still_shows_section():
 
 
 # ── Traffic Fines section ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_traffic_fines_section_leads_the_report():
+    with _patched():
+        message = await _report_text(_FULL_USER)
+    assert message.startswith("☀️ Good morning, Test!\n\n🚔 <b>Traffic Fines:</b>")
+
+
+@pytest.mark.asyncio
+async def test_report_sections_in_order():
+    units = [Obligation(unit_group=1, unit_group_label="KAT", obligations=["Unpaid fine"])]
+    clamp = ClampInfo(plate=PLATE, found=True, clamped=True)
+    with _patched(
+        licence=AsyncMock(return_value=units),
+        plate=AsyncMock(return_value=units),
+        clamp=AsyncMock(return_value=clamp),
+    ):
+        message = await _report_text(_FULL_USER)
+    headers = [
+        "🚔 <b>Traffic Fines:",
+        "🪪 <b>By driving licence:",
+        "🚗 <b>By vehicle plate (MVR):",
+        "🔧 <b>Technical Inspection",
+        "🛡️ <b>Civil Liability",
+        "🛣️ <b>Vignette",
+        "🔒 <b>Wheel clamp",
+    ]
+    positions = [message.index(header) for header in headers]
+    assert positions == sorted(positions)
 
 
 @pytest.mark.asyncio

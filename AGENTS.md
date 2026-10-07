@@ -72,10 +72,6 @@ wired up in `run_bot.py`.
   connection-per-call or a pool. Read the module docstring in `db.py`
   before touching connection handling — this was a deliberate fix for a
   concurrency bug, not an oversight.
-- **Versioned schema migrations.** Schema/data changes are numbered steps in
-  `db._migrate`, gated on `PRAGMA user_version` and run once inside
-  `init_db()`'s transaction. Add a new step and bump `_SCHEMA_VERSION` —
-  don't add more "if column missing" checks.
 - **Vehicles and the main vehicle.** A user has up to `db.MAX_VEHICLES` rows
   in `user_vehicles`; `user_profiles.vehicle_plate` names the main
   (preferred) one. Change it only through the `db` vehicle functions

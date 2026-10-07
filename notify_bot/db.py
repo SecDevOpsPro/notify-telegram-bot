@@ -19,8 +19,6 @@ vehicle a check uses when no plate is given.  The vehicle functions here
 keep it pointing at one of the user's vehicles: the first vehicle saved
 becomes preferred, and deleting the preferred one hands the role to the
 oldest remaining vehicle, or clears it when it was the last.
-
-Schema changes are versioned with ``PRAGMA user_version`` — see ``_migrate``.
 """
 
 from __future__ import annotations
@@ -34,6 +32,8 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Literal, TypedDict, cast
 
 import aiosqlite
+
+from notify_bot import legacy_upgrade
 
 logger = logging.getLogger(__name__)
 
@@ -134,9 +134,6 @@ CREATE TABLE IF NOT EXISTS user_vehicles (
 )
 """
 
-#: Bump alongside each new step in ``_migrate``.
-_SCHEMA_VERSION = 1
-
 # Vehicles in display order: the preferred one first, then oldest first.
 # Needs ``user_vehicles v`` joined with ``user_profiles p``.
 _VEHICLE_ORDER = "(v.plate IS p.vehicle_plate) DESC, v.id"
@@ -206,73 +203,11 @@ async def _write(sql: str, params: tuple[Any, ...] = ()) -> None:
         await conn.execute(sql, params)
 
 
-async def _column_exists(conn: aiosqlite.Connection, table: str, column: str) -> bool:
-    """Return whether *column* exists in *table* using SQLite metadata."""
-    async with conn.execute(f"PRAGMA table_info({table})") as cur:
-        rows = await cur.fetchall()
-    return any(row[1] == column for row in rows)
-
-
-# ── Migrations ────────────────────────────────────────────────────────────────
-
-
-async def _migrate_to_vehicles(conn: aiosqlite.Connection) -> None:
-    """Version 1: move each profile's single plate + talon into ``user_vehicles``.
-
-    The profile's ``vehicle_plate`` stays, normalised, as the preferred-vehicle
-    pointer.  The talon now lives only on the vehicle, so its profile column
-    is dropped.  Also adds the missing ``created_at`` / ``updated_at`` columns.
-    """
-    # Profiles only had updated_at — the best guess for when they were created.
-    if not await _column_exists(conn, "user_profiles", "created_at"):
-        await conn.execute(
-            "ALTER TABLE user_profiles ADD COLUMN created_at TEXT NOT NULL DEFAULT ''"
-        )
-        await conn.execute("UPDATE user_profiles SET created_at = updated_at")
-    # Databases from before the talon was added never got the column.
-    if not await _column_exists(conn, "user_profiles", "talon_no"):
-        await conn.execute("ALTER TABLE user_profiles ADD COLUMN talon_no TEXT")
-    await conn.execute(
-        """
-        INSERT OR IGNORE INTO user_vehicles (user_id, plate, talon_no, created_at, updated_at)
-        SELECT user_id, UPPER(TRIM(vehicle_plate)), talon_no, updated_at, updated_at
-        FROM user_profiles
-        WHERE TRIM(vehicle_plate) <> ''
-        """
-    )
-    await conn.execute(
-        "UPDATE user_profiles SET vehicle_plate = NULLIF(UPPER(TRIM(vehicle_plate)), '')"
-    )
-    await conn.execute("ALTER TABLE user_profiles DROP COLUMN talon_no")
-
-    # Add users.updated_at, starting existing users at their created_at.
-    # A fresh database already has it from _CREATE_USERS.
-    if not await _column_exists(conn, "users", "updated_at"):
-        await conn.execute("ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
-        await conn.execute("UPDATE users SET updated_at = created_at")
-
-
-async def _migrate(conn: aiosqlite.Connection) -> None:
-    """Bring the schema up to ``_SCHEMA_VERSION``, one numbered step at a time.
-
-    Each step runs exactly once per database (tracked in ``PRAGMA
-    user_version``), so a data migration never re-runs on restart — e.g.
-    re-copying plates would bring back vehicles a user has since deleted.
-    """
-    async with conn.execute("PRAGMA user_version") as cur:
-        row = await cur.fetchone()
-    version = row[0] if row else 0
-    if version < 1:
-        await _migrate_to_vehicles(conn)
-    if version < _SCHEMA_VERSION:
-        await conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
-
-
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 
 async def init_db() -> None:
-    """Open the shared connection (closing any previous one), create tables and migrate.
+    """Open the shared connection (closing any previous one) and create tables.
 
     Call once at process startup (e.g. from ``run_bot._post_init``).  Do not
     call again while the bot is serving traffic — ``init_db`` closes any
@@ -306,13 +241,13 @@ async def init_db() -> None:
                 journal_mode or None,
             )
         await conn.execute("PRAGMA busy_timeout=5000")
-        # One explicit transaction, so a failed migration leaves the file untouched.
+        # One explicit transaction, so a failed upgrade leaves the file untouched.
         await conn.execute("BEGIN")
         try:
             await conn.execute(_CREATE_USERS)
             await conn.execute(_CREATE_PROFILES)
             await conn.execute(_CREATE_VEHICLES)
-            await _migrate(conn)
+            await legacy_upgrade.upgrade(conn)  # one-off; remove with legacy_upgrade.py
             await conn.commit()
         except BaseException:
             await conn.rollback()

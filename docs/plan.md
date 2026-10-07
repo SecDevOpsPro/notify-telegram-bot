@@ -146,8 +146,7 @@ erDiagram
 ```
 
 `user_profiles.vehicle_plate` names the user's main (preferred) vehicle in
-`user_vehicles`; `(user_id, plate)` is unique.  The schema version is kept in
-`PRAGMA user_version` (see `db._migrate`).
+`user_vehicles`; `(user_id, plate)` is unique.
 
 `status` values: `pending` · `approved` · `denied`
 

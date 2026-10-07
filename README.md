@@ -38,14 +38,18 @@ stored profile (national ID, driving licence, vehicle plate).
 
 | Command | Description |
 |---|---|
-| `/enroll` | Wizard to save national ID, driving licence, and plate |
+| `/enroll` | Wizard to save national ID, driving licence, and your main vehicle (plate + talon) |
+| `/vehicles` | List your vehicles, choose the main one, remove one |
+| `/addvehicle` | Add another vehicle (up to a maximum) |
+| `/myinfo` | Show your saved data and vehicles |
 | `/driver` | Check driving licence obligations (MVR API) |
-| `/plate` | Check vehicle obligations (MVR API) |
+| `/plate [PLATE]` | Check vehicle obligations (MVR API) |
 | `/vignette [PLATE]` | Check road e-vignette status (bgtoll.bg) |
 | `/sticker [PLATE]` | Check Sofia parking sticker (sofiatraffic.bg) |
 | `/clamp [PLATE]` | Check wheel-clamp status (sofiatraffic.bg) |
 
-`[PLATE]` is optional — if omitted, the plate stored via `/enroll` is used.
+`[PLATE]` is optional — if omitted, your main vehicle is used and the reply
+lists your other vehicles. The daily report checks every saved vehicle.
 
 ### Admin only
 
@@ -100,6 +104,7 @@ uv run pytest tests/
 |---|---|---|---|
 | `TOKEN` | ✅ | — | Telegram Bot API token (from @BotFather) |
 | `ADMIN_TELEGRAM_ID` | ✅ | `0` | Your Telegram user ID (integer) |
+| `DEBUG_USER_IDS` | | — | Comma-separated user IDs that get full error detail, like the admin |
 | `DATABASE_PATH` | | `/app/data/bot.db` | SQLite database file path |
 | `LOG_FILE_PATH` | | `/app/data/errors.log` | Error log file path |
 | `DAILY_REPORT_TIME` | | `08:00` | Daily report time in `HH:MM` UTC |
@@ -120,8 +125,10 @@ graph TD
         subgraph handlers["handlers/"]
             HC[common.py — /start /help /request]
             HA[admin.py — /approve /deny /pending /users]
-            HE[enroll.py — ConversationHandler wizard]
-            HO[obligations.py — /driver /plate /vignette /sticker /clamp]
+            HE[enroll.py — /enroll wizard /myinfo /unenroll]
+            HV[vehicles.py — /vehicles /addvehicle]
+            HO[obligations.py — /driver /plate /vignette /sticker /clamp /gtp /mtpl /fines /vehicle]
+            HM[menu.py — /help menu buttons]
             HU[eur.py — /change]
         end
 
@@ -130,6 +137,7 @@ graph TD
             SCC[cambiocuba.py — CambioCuba API]
             SBG[bgtoll.py — e-Vignette API]
             SST[sofiatraffic.py — Sofia Parking API]
+            SBO[boleron.py — GTP / MTPL / fines / vehicle data API]
         end
 
         subgraph scheduler["scheduler/"]
@@ -140,9 +148,9 @@ graph TD
     TG <-->|polling| RB
     RB --> handlers & JQ
     handlers --> DB
-    HO --> SMVR & SBG & SST
+    HO --> SMVR & SBG & SST & SBO
     HU --> SCC
-    JQ --> SMVR & SBG & SST & DB
+    JQ --> SMVR & SBG & SST & SBO & DB
 ```
 
 ---
@@ -159,14 +167,17 @@ notify_bot/
   handlers/
     common.py          — /start, /help, /request
     admin.py           — /approve, /deny, /pending, /users
-    enroll.py          — ConversationHandler enrollment wizard
-    obligations.py     — /driver, /plate, /vignette, /sticker, /clamp
+    enroll.py          — /enroll wizard, /myinfo, /unenroll
+    vehicles.py        — /vehicles, /addvehicle
+    obligations.py     — /driver, /plate, /vignette, /sticker, /clamp, /gtp, /mtpl, /fines, /vehicle
+    menu.py            — /help menu buttons
     eur.py             — /change
   services/
     mvr.py             — MVR Obligations API (httpx async)
     cambiocuba.py      — CambioCuba exchange rate API
     bgtoll.py          — e-Vignette API (bgtoll.bg)
     sofiatraffic.py    — Sofia parking APIs (sofiatraffic.bg)
+    boleron.py         — GTP, MTPL, fines and vehicle data (boleron.bg)
   scheduler/
     jobs.py            — daily_obligations_report job
 docs/

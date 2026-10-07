@@ -265,7 +265,8 @@ async def test_start_approved_with_profile_skips_enroll_prompt():
     keyboard = call.kwargs["reply_markup"]
     buttons = [b.callback_data for row in keyboard.inline_keyboard for b in row]
     assert "cmd:driver" in buttons
-    assert "cmd:enroll" not in buttons
+    labels = [b.text for row in keyboard.inline_keyboard for b in row]
+    assert "📝 Update info" in labels
     assert "cmd:pending" not in buttons
 
 

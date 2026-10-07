@@ -5,6 +5,11 @@ Guides an approved user through saving (or updating) their:
   1. National ID (EGN — 10 digits)
   2. Driving licence number
   3. Vehicle plate number
+  4. That vehicle's talon number
+
+Steps 3-4 only run while the user has no vehicle saved: they add the first
+(main) vehicle.  Once one exists, re-running /enroll updates just steps 1-2;
+vehicles are then managed with /vehicles.
 
 Each step shows the current stored value and offers /skip to keep it.
 /back returns to the previous step (unavailable on step 1).
@@ -36,7 +41,12 @@ from notify_bot.middlewares import require_approved
 from notify_bot.updates import require
 
 # Exported for run_bot registration
-__all__ = ["build_enroll_handler", "build_stale_enroll_button_handler", "unenroll_command"]
+__all__ = [
+    "build_enroll_handler",
+    "build_stale_enroll_button_handler",
+    "myinfo_command",
+    "unenroll_command",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +58,8 @@ ASK_NATIONAL_ID, ASK_LICENCE, ASK_PLATE, ASK_TALON = range(4)
 
 _EGN_RE = re.compile(r"^\d{10}$")
 _LICENCE_RE = re.compile(r"^(?:\d{5,12}|[A-Z]{2}\d{7})$", re.IGNORECASE)
-_PLATE_RE = re.compile(r"^[A-Z]{1,3}\d{3,4}[A-Z]{0,3}$", re.IGNORECASE)
-_TALON_RE = re.compile(r"^\d{6,12}$")
+PLATE_RE = re.compile(r"^[A-Z]{1,3}\d{3,4}[A-Z]{0,3}$", re.IGNORECASE)
+TALON_RE = re.compile(r"^\d{6,12}$")
 
 
 def _uid(update: Update) -> int:
@@ -88,6 +98,22 @@ async def _current_value(
         return user_data[key], False
     profile = await db.get_profile(user_id)
     return (profile.get(field) if profile else None), True
+
+
+async def _current_talon(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> tuple[str | None, bool]:
+    """Like ``_current_value``, for the talon — which lives on the vehicle, not the profile.
+
+    The saved talon is that of the plate chosen this run (typed or kept), if
+    the user has that vehicle saved.
+    """
+    user_data = _user_data(context)
+    if "enroll_talon" in user_data:
+        return user_data["enroll_talon"], False
+    plate, _ = await _current_value(context, user_id, "enroll_plate", "vehicle_plate")
+    vehicle = await db.get_vehicle(user_id, plate) if plate else None
+    return (vehicle["talon_no"] if vehicle else None), True
 
 
 def _format_current(raw: str | None, is_saved: bool) -> str:
@@ -135,12 +161,22 @@ async def enroll_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return await _ask_national_id(update, context)
 
 
+async def _has_vehicles(user_id: int) -> bool:
+    return bool(await db.list_vehicles(user_id))
+
+
+async def _step(user_id: int, step: int) -> str:
+    """The "Step n of N" heading — only 2 steps once the user has a vehicle."""
+    total = 2 if await _has_vehicles(user_id) else 4
+    return f"📋 <b>Enrollment Wizard</b> — Step {step} of {total}"
+
+
 async def _ask_national_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     raw, is_saved = await _current_value(context, _uid(update), "enroll_national_id", "national_id")
     hint, keyboard = _skip_hint_and_keyboard(bool(raw), has_back=False)
 
     await _reply_target(update).reply_html(
-        "📋 <b>Enrollment Wizard</b> — Step 1 of 4\n\n"
+        f"{await _step(_uid(update), 1)}\n\n"
         f"Current National ID: {_format_current(raw, is_saved)}\n\n"
         f"Please enter your <b>National ID (EGN)</b> — 10 digits.\n{hint}",
         reply_markup=keyboard,
@@ -187,7 +223,7 @@ async def _ask_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     hint, keyboard = _skip_hint_and_keyboard(bool(raw), has_back=True)
 
     await _reply_target(update).reply_html(
-        "📋 <b>Enrollment Wizard</b> — Step 2 of 4\n\n"
+        f"{await _step(_uid(update), 2)}\n\n"
         f"Current Driving Licence: {_format_current(raw, is_saved)}\n\n"
         "Please enter your <b>Driving Licence number</b> (digits only, or 2 letters + 7 digits "
         f"e.g. <code>DA2123456</code>).\n{hint}",
@@ -214,7 +250,7 @@ async def received_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ASK_LICENCE
 
     _user_data(context)["enroll_licence"] = text
-    return await _ask_plate(update, context)
+    return await _after_licence(update, context)
 
 
 async def skip_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -226,12 +262,19 @@ async def skip_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             "please enter one, or /cancel to quit."
         )
         return ASK_LICENCE
-    return await _ask_plate(update, context)
+    return await _after_licence(update, context)
 
 
 async def back_to_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await _ack_callback(update)
     return await _ask_licence(update, context)
+
+
+async def _after_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Go on to the vehicle steps, or finish if the user already has a vehicle."""
+    if await _has_vehicles(_uid(update)):
+        return await _save_and_confirm(update, context)
+    return await _ask_plate(update, context)
 
 
 async def _ask_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -241,7 +284,8 @@ async def _ask_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await _reply_target(update).reply_html(
         "📋 <b>Enrollment Wizard</b> — Step 3 of 4\n\n"
         f"Current Vehicle Plate: {_format_current(raw, is_saved)}\n\n"
-        f"Please enter your <b>vehicle plate</b> (e.g. <code>CB1234AB</code>).\n{hint}",
+        f"Please enter your <b>vehicle plate</b> (e.g. <code>CB1234AB</code>). "
+        f"You can add more vehicles later with /vehicles.\n{hint}",
         reply_markup=keyboard,
     )
     return ASK_PLATE
@@ -253,7 +297,7 @@ async def _ask_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def received_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = require(update.message, "message")
     text = require(message.text, "text").strip().upper()
-    if not _PLATE_RE.match(text):
+    if not PLATE_RE.match(text):
         can_skip, _ = await _current_value(context, _uid(update), "enroll_plate", "vehicle_plate")
         retry_hint = "Try again or /skip." if can_skip else "Try again, or /cancel to quit."
         await message.reply_text(f"❌ Invalid plate format (e.g. CB1234AB).  {retry_hint}")
@@ -281,7 +325,7 @@ async def back_to_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def _ask_talon(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    raw, is_saved = await _current_value(context, _uid(update), "enroll_talon", "talon_no")
+    raw, is_saved = await _current_talon(context, _uid(update))
     hint, keyboard = _skip_hint_and_keyboard(bool(raw), has_back=True)
 
     await _reply_target(update).reply_html(
@@ -299,8 +343,8 @@ async def _ask_talon(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def received_talon(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = require(update.message, "message")
     text = require(message.text, "text").strip()
-    if not _TALON_RE.match(text):
-        can_skip, _ = await _current_value(context, _uid(update), "enroll_talon", "talon_no")
+    if not TALON_RE.match(text):
+        can_skip, _ = await _current_talon(context, _uid(update))
         retry_hint = "Try again or /skip." if can_skip else "Try again, or /cancel to quit."
         await message.reply_text(f"❌ Invalid talon number (6–12 digits).  {retry_hint}")
         return ASK_TALON
@@ -311,7 +355,7 @@ async def received_talon(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def skip_talon(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await _ack_callback(update)
-    raw, _ = await _current_value(context, _uid(update), "enroll_talon", "talon_no")
+    raw, _ = await _current_talon(context, _uid(update))
     if not raw:
         await _reply_target(update).reply_text(
             "❌ You don't have a saved Talon No to skip — please enter one, or /cancel to quit."
@@ -332,14 +376,16 @@ async def _save_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     talon = user_data.pop("enroll_talon", None)
 
     try:
-        await db.upsert_profile(
-            uid,
-            national_id=national_id,
-            driving_licence=licence,
-            vehicle_plate=plate,
-            talon_no=talon,
-        )
+        await db.upsert_profile(uid, national_id=national_id, driving_licence=licence)
+        if plate:
+            # Only asked for while the user has no vehicle — this becomes the main one.
+            await db.save_vehicle(uid, plate, talon)
         profile = await db.get_profile(uid)
+        vehicle = (
+            await db.get_vehicle(uid, profile["vehicle_plate"])
+            if profile and profile["vehicle_plate"]
+            else None
+        )
     except Exception as exc:
         logger.exception("Failed to save profile for user_id=%s", uid)
         await _reply_target(update).reply_html(
@@ -365,10 +411,11 @@ async def _save_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         "✅ <b>Profile saved!</b>\n\n"
         f"National ID:      <code>{profile.get('national_id') or '—'}</code>\n"
         f"Driving Licence:  <code>{profile.get('driving_licence') or '—'}</code>\n"
-        f"Vehicle Plate:    <code>{profile.get('vehicle_plate') or '—'}</code>\n"
-        f"Talon No:         <code>{profile.get('talon_no') or '—'}</code>\n\n"
+        f"Main Vehicle:     <code>{profile.get('vehicle_plate') or '—'}</code>\n"
+        f"Talon No:         <code>{(vehicle['talon_no'] if vehicle else None) or '—'}</code>\n\n"
         "Use /driver to check driving licence obligations.\n"
-        "Use /plate to check vehicle obligations."
+        "Use /plate to check vehicle obligations.\n"
+        "Use /vehicles to add more vehicles or change the main one."
     )
     return ConversationHandler.END
 
@@ -404,12 +451,50 @@ async def stale_enroll_button(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.debug("Could not clear stale enroll keyboard", exc_info=True)
 
 
+# ── Current info ─────────────────────────────────────────────────────────────
+
+
+@require_approved
+async def myinfo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/myinfo — show the user's saved personal data and vehicles."""
+    message = require(update.message, "message")
+    uid = _uid(update)
+    profile = await db.get_profile(uid)
+    vehicles = await db.list_vehicles(uid)
+    if not profile and not vehicles:
+        await message.reply_text(
+            "ℹ️ You don't have any saved data yet — use /enroll to add it.",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("📝 Enroll", callback_data="cmd:enroll")]]
+            ),
+        )
+        return
+
+    lines = [
+        "👤 <b>Your info</b>",
+        "",
+        f"National ID:      <code>{(profile and profile['national_id']) or '—'}</code>",
+        f"Driving Licence:  <code>{(profile and profile['driving_licence']) or '—'}</code>",
+        "",
+        "🚘 <b>Vehicles</b>",
+    ]
+    for vehicle in vehicles:
+        talon = vehicle["talon_no"]
+        talon_text = f"talon <code>{talon}</code>" if talon else "⚠️ no talon"
+        lines.append(f"• <code>{vehicle['plate']}</code> — {talon_text}")
+    if not vehicles:
+        lines.append("—")
+    elif len(vehicles) > 1:
+        lines.append(f"\nMain vehicle: <code>{vehicles[0]['plate']}</code>")
+    await message.reply_html("\n".join(lines))
+
+
 # ── De-registration ──────────────────────────────────────────────────────────
 
 
 @require_approved
 async def unenroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/unenroll — delete the user's saved profile data."""
+    """/unenroll — delete the user's saved profile data and vehicles."""
     message = require(update.message, "message")
     uid = _uid(update)
     profile = await db.get_profile(uid)
@@ -433,7 +518,7 @@ async def unenroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     await message.reply_text(
         "🗑️ Your profile data has been deleted.\n"
-        "National ID, driving licence, vehicle plate and talon number have been removed.\n\n"
+        "National ID, driving licence and all your vehicles have been removed.\n\n"
         "Use /enroll to save new data at any time."
     )
 

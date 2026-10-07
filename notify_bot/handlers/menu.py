@@ -51,7 +51,7 @@ def _dispatch_table() -> dict[str, HandlerCallback[None]]:
     # these handler modules import from common.py.
     from notify_bot.handlers.admin import brief_cmd, myip_cmd, pending_cmd, users_cmd
     from notify_bot.handlers.common import list_commands_command, request_access
-    from notify_bot.handlers.enroll import unenroll_command
+    from notify_bot.handlers.enroll import myinfo_command, unenroll_command
     from notify_bot.handlers.eur import eur_command
     from notify_bot.handlers.obligations import (
         clamp_command,
@@ -64,11 +64,13 @@ def _dispatch_table() -> dict[str, HandlerCallback[None]]:
         vehicle_command,
         vignette_command,
     )
+    from notify_bot.handlers.vehicles import vehicles_command
 
     return {
         "list_commands": list_commands_command,
         "request": request_access,
         "change": eur_command,
+        "myinfo": myinfo_command,
         "unenroll": unenroll_command,
         "driver": driver_command,
         "plate": plate_command,
@@ -79,6 +81,7 @@ def _dispatch_table() -> dict[str, HandlerCallback[None]]:
         "mtpl": mtpl_command,
         "fines": fines_command,
         "vehicle": vehicle_command,
+        "vehicles": vehicles_command,
         "pending": pending_cmd,
         "users": users_cmd,
         "myip": myip_cmd,
@@ -101,8 +104,7 @@ async def get_user_phase(user_id: int) -> MenuPhase:
         has_profile = bool(
             profile
             and any(
-                profile.get(field)
-                for field in ("national_id", "driving_licence", "vehicle_plate", "talon_no")
+                profile.get(field) for field in ("national_id", "driving_licence", "vehicle_plate")
             )
         )
 
@@ -145,17 +147,21 @@ def build_help_keyboard(phase: MenuPhase) -> InlineKeyboardMarkup:
     if not phase["is_approved"]:
         rows.append(_row(("📨 Request access", "request"), ("💶 Change (EUR)", "change")))
     elif not phase["has_profile"]:
-        rows.append([InlineKeyboardButton("📝 Enroll your data", callback_data="cmd:enroll")])
+        rows.append(_row(("📝 Enroll", "enroll"), ("🗑 Unenroll", "unenroll")))
         rows.append(_row(("💶 Change (EUR)", "change")))
     else:
         rows.append(_header("🚗 Vehicle checks"))
-        rows.append(_row(("🚗 Driver", "driver"), ("🚙 Plate", "plate")))
-        rows.append(_row(("🛣 Vignette", "vignette"), ("🅿 Sticker", "sticker")))
-        rows.append(_row(("🔒 Clamp", "clamp"), ("🧾 GTP", "gtp")))
-        rows.append(_row(("🛡 MTPL", "mtpl"), ("🚨 Fines", "fines")))
-        rows.append([InlineKeyboardButton("🚗 Vehicle data", callback_data="cmd:vehicle")])
+        # Same order as the daily report's sections (scheduler.jobs._build_report);
+        # the report has no parking sticker, so it comes last.
+        rows.append(_row(("🚨 Fines", "fines"), ("🚗 Driver", "driver")))
+        rows.append(_row(("🚙 Plate", "plate"), ("🧾 GTP", "gtp")))
+        rows.append(_row(("🛡 MTPL", "mtpl"), ("🛣 Vignette", "vignette")))
+        rows.append(_row(("🔒 Clamp", "clamp"), ("🅿 Sticker", "sticker")))
         rows.append(_header("⚙️ Account"))
-        rows.append(_row(("💶 Change", "change"), ("🗑 Unenroll", "unenroll")))
+        rows.append(_row(("🚘 My vehicles", "vehicles"), ("🚗 Vehicle data", "vehicle")))
+        # "cmd:enroll" re-runs the /enroll wizard, which then only updates personal data.
+        rows.append(_row(("📝 Update info", "enroll"), ("🗑 Unenroll", "unenroll")))
+        rows.append(_row(("👤 My info", "myinfo"), ("💶 Change (EUR)", "change")))
 
     if phase["is_admin"]:
         rows.append(_header("🛠 Admin"))
@@ -193,7 +199,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """Dispatch every "cmd:<name>" button tap on the /help menu to its handler."""
     query = require(update.callback_query, "callback_query")
 
-    _, _, action = (query.data or "").partition(":")
+    # "cmd:<name>" or "cmd:<name>:<arg>" — the optional arg becomes the command's argument.
+    _, _, rest = (query.data or "").partition(":")
+    action, _, arg = rest.partition(":")
     handler = _dispatch_table().get(action)
     if handler is None:
         logger.warning("Unknown menu button callback_data=%s", query.data)
@@ -210,7 +218,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     await query.answer()
-    context.args = []
+    context.args = [arg] if arg else []
     # _ButtonUpdate only implements the attributes handlers read (see its docstring),
     # so it is not a real Update — hence the cast at this one hand-off point.
     await handler(cast(Update, _ButtonUpdate(update, message)), context)

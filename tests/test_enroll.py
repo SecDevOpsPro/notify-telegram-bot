@@ -21,9 +21,17 @@ from notify_bot.handlers.enroll import (
     build_stale_enroll_button_handler,
     cancel,
     enroll_start,
+    received_licence,
     skip_national_id,
     stale_enroll_button,
 )
+
+
+@pytest.fixture(autouse=True)
+def _vehicles():
+    """No saved vehicles unless a test says otherwise — the wizard runs all 4 steps."""
+    with patch("notify_bot.handlers.enroll.db.list_vehicles", new=AsyncMock(return_value=[])) as m:
+        yield m
 
 
 def _make_update(user_id: int = 1) -> MagicMock:
@@ -54,21 +62,30 @@ async def test_save_and_confirm_reports_saved_profile():
         "national_id": "1234567890",
         "driving_licence": "12345",
         "vehicle_plate": "CB1234AB",
-        "talon_no": "123456",
     }
+    save_vehicle = AsyncMock()
 
     with (
         patch("notify_bot.handlers.enroll.db.upsert_profile", new=AsyncMock()),
+        patch("notify_bot.handlers.enroll.db.save_vehicle", new=save_vehicle),
         patch(
             "notify_bot.handlers.enroll.db.get_profile",
             new=AsyncMock(return_value=saved_profile),
+        ),
+        patch(
+            "notify_bot.handlers.enroll.db.get_vehicle",
+            new=AsyncMock(return_value={"plate": "CB1234AB", "talon_no": "123456"}),
         ),
     ):
         state = await _save_and_confirm(update, context)
 
     assert state == ConversationHandler.END
+    save_vehicle.assert_awaited_once_with(1, "CB1234AB", "123456")
     update.message.reply_html.assert_awaited_once()
-    assert "Profile saved" in update.message.reply_html.call_args[0][0]
+    text = update.message.reply_html.call_args[0][0]
+    assert "Profile saved" in text
+    assert "<code>CB1234AB</code>" in text
+    assert "<code>123456</code>" in text
 
 
 @pytest.mark.asyncio
@@ -102,6 +119,7 @@ async def test_save_and_confirm_does_not_crash_when_refetch_returns_none():
 
     with (
         patch("notify_bot.handlers.enroll.db.upsert_profile", new=AsyncMock()),
+        patch("notify_bot.handlers.enroll.db.save_vehicle", new=AsyncMock()),
         patch("notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=None)),
     ):
         state = await _save_and_confirm(update, context)
@@ -410,3 +428,46 @@ async def test_saved_db_value_is_not_flagged_as_unsaved():
     text = update.message.reply_html.call_args[0][0]
     assert "9999999999" in text
     assert "not yet saved" not in text
+
+
+@pytest.mark.asyncio
+async def test_re_enrolling_with_a_vehicle_stops_after_licence_and_keeps_vehicles(_vehicles):
+    _vehicles.return_value = [{"plate": "CB1234AB", "talon_no": "123456"}]
+    update = _make_update()
+    update.message.text = "DA2123456"
+    context = MagicMock()
+    context.user_data = {"enroll_national_id": "1234567890"}
+    upsert_profile = AsyncMock()
+    save_vehicle = AsyncMock()
+
+    with (
+        patch("notify_bot.handlers.enroll.db.upsert_profile", new=upsert_profile),
+        patch("notify_bot.handlers.enroll.db.save_vehicle", new=save_vehicle),
+        patch(
+            "notify_bot.handlers.enroll.db.get_profile",
+            new=AsyncMock(return_value={"vehicle_plate": "CB1234AB"}),
+        ),
+        patch("notify_bot.handlers.enroll.db.get_vehicle", new=AsyncMock(return_value=None)),
+    ):
+        state = await received_licence(update, context)
+
+    assert state == ConversationHandler.END
+    upsert_profile.assert_awaited_once_with(
+        1, national_id="1234567890", driving_licence="DA2123456"
+    )
+    save_vehicle.assert_not_awaited()
+    assert "Profile saved" in update.message.reply_html.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_wizard_has_two_steps_once_a_vehicle_is_saved(_vehicles):
+    _vehicles.return_value = [{"plate": "CB1234AB", "talon_no": "123456"}]
+    update = _make_update()
+    update.callback_query = None
+    context = MagicMock()
+    context.user_data = {}
+
+    with patch("notify_bot.handlers.enroll.db.get_profile", new=AsyncMock(return_value=None)):
+        await enroll_start(update, context)
+
+    assert "Step 1 of 2" in update.message.reply_html.call_args[0][0]

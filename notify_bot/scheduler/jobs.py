@@ -19,7 +19,7 @@ import random
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, Type, cast
 
-from telegram import InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from notify_bot import db
@@ -76,9 +76,30 @@ _RETRY_BASE_DELAY: float = 5.0
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _check_failed(uid: int, title: str, command: str, exc: Exception) -> str:
-    """Section shown when a check errored — the report always lists every check."""
-    return format_error(uid, f"{title}\n⚠️ Check failed — try /{command} later.", exc)
+def _check_failed(uid: int, title: str, exc: Exception) -> str:
+    """Section shown when a check errored — the report always lists every check.
+
+    Its retry is a button under the report (see ``_retry_button``): a typed
+    hint like "/plate CB1234AB" isn't enough, since tapping a command in a
+    message sends it without its argument.
+    """
+    return format_error(uid, f"{title}\n⚠️ Check failed — tap its 🔁 button below to retry.", exc)
+
+
+def _retry_button(label: str, command: str, plate: str | None = None) -> InlineKeyboardButton:
+    """A "🔁 Retry" button that re-runs *command* (for *plate*) via the /help menu callback."""
+    if plate:
+        return InlineKeyboardButton(f"🔁 {label} {plate}", callback_data=f"cmd:{command}:{plate}")
+    return InlineKeyboardButton(f"🔁 {label}", callback_data=f"cmd:{command}")
+
+
+def _report_keyboard(
+    fines: InlineKeyboardMarkup | None, retries: list[InlineKeyboardButton]
+) -> InlineKeyboardMarkup | None:
+    """The fines shortcuts, then the failed checks' retry buttons, two per row."""
+    rows = [list(row) for row in fines.inline_keyboard] if fines else []
+    rows.extend(retries[i : i + 2] for i in range(0, len(retries), 2))
+    return InlineKeyboardMarkup(rows) if rows else None
 
 
 # ── Retry helper ──────────────────────────────────────────────────────────────
@@ -126,10 +147,32 @@ async def _retry[T](
 
 @dataclass(frozen=True, slots=True)
 class _Report:
-    """One user's daily report: the message text plus its /driver and /plate fine shortcuts."""
+    """One user's daily report: its entries plus the fine shortcuts and retry buttons.
 
-    text: str
+    The first entry is the greeting with the personal checks (fines, licence)
+    and the main vehicle's sections; each one after it is another vehicle's.
+    Each entry is sent as its own message.
+    """
+
+    entries: tuple[str, ...]
     reply_markup: InlineKeyboardMarkup | None
+
+    @property
+    def text(self) -> str:
+        """The whole report as one string."""
+        return "\n\n".join(self.entries)
+
+
+async def _send_report(context: ContextTypes.DEFAULT_TYPE, chat_id: int, report: _Report) -> None:
+    """Send *report* one entry per message; its buttons go on the last one."""
+    for i, text in enumerate(report.entries):
+        last = i == len(report.entries) - 1
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=report.reply_markup if last else None,
+        )
 
 
 async def _build_report(user: ReportTarget) -> _Report | None:
@@ -141,20 +184,20 @@ async def _build_report(user: ReportTarget) -> _Report | None:
     clamp checks, which only appear when they find something or fail.  The
     parking sticker isn't checked at all: sofiatraffic.bg misses active
     stickers too often for an unprompted report (/sticker still offers it).
-    Sections follow the order the checks run in: fines, the MVR obligation
-    details, inspection, MTPL, vignette, then wheel clamp.  Returns ``None``
+    Sections follow the order the checks run in: fines and the MVR licence
+    details first, then for each vehicle (preferred first) its MVR plate
+    details, inspection, MTPL, vignette and wheel clamp.  Returns ``None``
     only when the user has no profile data that any check applies to.
     """
     uid: int = user["user_id"]
     name: str = user.get("first_name") or "there"
     national_id: str | None = user.get("national_id")
     licence: str | None = user.get("driving_licence")
-    plate: str | None = user.get("vehicle_plate")
-    talon: str | None = user.get("talon_no")
 
     sections: list[str] = []
     licence_units: list[Obligation] = []  # decide which /driver, /plate buttons the report gets
-    plate_units: list[Obligation] = []
+    plate_units: dict[str, list[Obligation]] = {}
+    retries: list[InlineKeyboardButton] = []  # one per failed check
 
     calls_made = False
 
@@ -182,7 +225,8 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 fines_section = "🚔 <b>Traffic Fines:</b>\n✅ No fines."
         except BoleronError as exc:
             logger.warning("Fines check failed for user %s: %s", uid, exc)
-            fines_section = _check_failed(uid, "🚔 <b>Traffic Fines:</b>", "fines", exc)
+            fines_section = _check_failed(uid, "🚔 <b>Traffic Fines:</b>", exc)
+            retries.append(_retry_button("Retry fines", "fines"))
         sections.append(fines_section)
 
     if national_id and licence:
@@ -194,23 +238,31 @@ async def _build_report(user: ReportTarget) -> _Report | None:
             licence_units = units
         except MVRApiError as exc:
             logger.warning("Licence check failed for user %s: %s", uid, exc)
-            sections.append(_check_failed(uid, "🪪 <b>By driving licence:</b>", "driver", exc))
+            sections.append(_check_failed(uid, "🪪 <b>By driving licence:</b>", exc))
+            retries.append(_retry_button("Retry driver", "driver"))
 
-    if national_id and plate:
-        try:
-            await pause()
-            units = await _retry(check_by_plate, national_id=national_id, plate_number=plate)
-            if any(unit.has_obligations for unit in units):
-                sections.append("🚗 <b>By vehicle plate (MVR):</b>\n" + render_obligations(units))
-            plate_units = units
-        except MVRApiError as exc:
-            logger.warning("Plate check failed for user %s: %s", uid, exc)
-            sections.append(_check_failed(uid, "🚗 <b>By vehicle plate (MVR):</b>", "plate", exc))
+    vehicle_starts: list[int] = []  # where each vehicle's sections begin
+    for vehicle in user["vehicles"]:
+        vehicle_starts.append(len(sections))
+        plate = vehicle["plate"]
+        talon = vehicle["talon_no"]
 
-    if plate:
+        if national_id:
+            plate_title = f"🚗 <b>By vehicle plate {plate} (MVR):</b>"
+            try:
+                await pause()
+                units = await _retry(check_by_plate, national_id=national_id, plate_number=plate)
+                if any(unit.has_obligations for unit in units):
+                    sections.append(f"{plate_title}\n" + render_obligations(units))
+                plate_units[plate] = units
+            except MVRApiError as exc:
+                logger.warning("Plate check failed for user %s (%s): %s", uid, plate, exc)
+                sections.append(_check_failed(uid, plate_title, exc))
+                retries.append(_retry_button("Retry plate", "plate", plate))
+
         gtp_title = f"🔧 <b>Technical Inspection ({plate}):</b>"
         if not talon:
-            sections.append(f"{gtp_title}\n⚠️ Talon number missing — save it with /enroll.")
+            sections.append(f"{gtp_title}\n⚠️ Talon number missing — save it with /vehicles.")
         else:
             try:
                 await pause()
@@ -223,15 +275,17 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 else:
                     sections.append(f"{gtp_title}\n❌ No valid inspection found.")
             except BoleronError as exc:
-                logger.warning("GTP check failed for user %s: %s", uid, exc)
-                sections.append(_check_failed(uid, gtp_title, "gtp", exc))
+                logger.warning("GTP check failed for user %s (%s): %s", uid, plate, exc)
+                sections.append(_check_failed(uid, gtp_title, exc))
+                retries.append(_retry_button("Retry GTP", "gtp", plate))
 
+        mtpl_title = f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>"
         try:
             await pause()
             mtpl = await _retry(check_mtpl, plate)
             status_icon = "✅" if mtpl.active else "❌"
             mtpl_lines = [
-                f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>",
+                mtpl_title,
                 f"{status_icon} {'Active' if mtpl.active else 'No active policy'}",
             ]
             if mtpl.insurer:
@@ -242,22 +296,18 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 mtpl_lines.append(warning)
             sections.append("\n".join(mtpl_lines))
         except BoleronError as exc:
-            logger.warning("MTPL check failed for user %s: %s", uid, exc)
-            sections.append(
-                _check_failed(uid, f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>", "mtpl", exc)
-            )
+            logger.warning("MTPL check failed for user %s (%s): %s", uid, plate, exc)
+            sections.append(_check_failed(uid, mtpl_title, exc))
+            retries.append(_retry_button("Retry MTPL", "mtpl", plate))
 
-    if plate:
+        vignette_title = f"🛣️ <b>Vignette ({plate}):</b>"
         try:
             await pause()
             vignette = await _retry(check_vignette, plate, skip_on=(CloudflareBlockedError,))
             if vignette.found:
                 status_icon = "✅" if vignette.is_valid else "❌"
                 status_label = "Active" if vignette.is_valid else "Inactive"
-                vignette_lines = [
-                    f"🛣️ <b>Vignette ({plate}):</b>",
-                    f"{status_icon} Status: {status_label}",
-                ]
+                vignette_lines = [vignette_title, f"{status_icon} Status: {status_label}"]
                 vignette_lines.extend(
                     format_validity_period(vignette.validity_date_from, vignette.validity_date_to)
                 )
@@ -267,7 +317,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                     vignette_lines.append(warning)
                 sections.append("\n".join(vignette_lines))
             else:
-                sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
+                sections.append(f"{vignette_title}\n❌ No active vignette found.")
         except (CloudflareBlockedError, BgtollError) as exc:
             logger.debug(
                 "Vignette check failed for user %s (%s) — falling back to boleron", uid, exc
@@ -277,10 +327,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 if bv.found:
                     status_icon = "✅" if bv.active else "❌"
                     status_label = "Active" if bv.active else "Inactive"
-                    bv_lines = [
-                        f"🛣️ <b>Vignette ({plate}):</b>",
-                        f"{status_icon} Status: {status_label}",
-                    ]
+                    bv_lines = [vignette_title, f"{status_icon} Status: {status_label}"]
                     bv_lines.extend(format_validity_period(bv.valid_from, bv.valid_to))
                     if bv.validity_type:
                         bv_lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
@@ -290,37 +337,42 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                         bv_lines.append(warning)
                     sections.append("\n".join(bv_lines))
                 else:
-                    sections.append(f"🛣️ <b>Vignette ({plate}):</b>\n❌ No active vignette found.")
+                    sections.append(f"{vignette_title}\n❌ No active vignette found.")
             except BoleronError as exc:
                 logger.warning("Boleron vignette fallback failed for user %s: %s", uid, exc)
-                sections.append(
-                    _check_failed(uid, f"🛣️ <b>Vignette ({plate}):</b>", "vignette", exc)
-                )
+                sections.append(_check_failed(uid, vignette_title, exc))
+                retries.append(_retry_button("Retry vignette", "vignette", plate))
 
-    if plate:
+        clamp_title = f"🔒 <b>Wheel clamp ({plate}):</b>"
         try:
             await pause()
             clamp = await _retry(check_clamp, plate, skip_on=(SofiaCloudflareError,))
             if clamp.found and clamp.clamped:
-                clamp_lines = [
-                    f"🔒 <b>Wheel clamp ({plate}):</b>",
-                    "❌ Vehicle <b>IS wheel-clamped!</b>",
-                ]
+                clamp_lines = [clamp_title, "❌ Vehicle <b>IS wheel-clamped!</b>"]
                 if clamp.clamped_at:
                     clamp_lines.append(f"🕐 Clamped at: {clamp.clamped_at}")
                 if clamp.location:
                     clamp_lines.append(f"📍 Location: {clamp.location}")
                 sections.append("\n".join(clamp_lines))
         except (SofiaCloudflareError, SofiaTrafficError) as exc:
-            logger.warning("Clamp check failed for user %s: %s", uid, exc)
-            sections.append(_check_failed(uid, f"🔒 <b>Wheel clamp ({plate}):</b>", "clamp", exc))
+            logger.warning("Clamp check failed for user %s (%s): %s", uid, plate, exc)
+            sections.append(_check_failed(uid, clamp_title, exc))
+            retries.append(_retry_button("Retry clamp", "clamp", plate))
 
     if not sections:
         return None
 
+    # One entry for the personal checks + the main vehicle, then one per other vehicle.
+    bounds = [0, *vehicle_starts[1:], len(sections)]
+    entries = [
+        "\n\n".join(sections[a:b]) for a, b in zip(bounds, bounds[1:], strict=False) if a < b
+    ]
+    entries[0] = f"☀️ Good morning, {name}!\n\n{entries[0]}"
     return _Report(
-        text=f"☀️ Good morning, {name}!\n\n" + "\n\n".join(sections),
-        reply_markup=build_fines_keyboard(licence=licence_units, plate=plate_units),
+        entries=tuple(entries),
+        reply_markup=_report_keyboard(
+            build_fines_keyboard(licence=licence_units, plates=plate_units), retries
+        ),
     )
 
 
@@ -337,9 +389,7 @@ async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     if report is None:
         return
     try:
-        await context.bot.send_message(
-            chat_id=uid, text=report.text, parse_mode="HTML", reply_markup=report.reply_markup
-        )
+        await _send_report(context, uid, report)
         logger.debug("Daily report sent to user %s", uid)
     except Exception as exc:
         logger.warning("Could not deliver daily report to user %s: %s", uid, exc)
@@ -360,12 +410,7 @@ async def send_user_report_now(context: ContextTypes.DEFAULT_TYPE, user: ReportT
     report = await _build_report(user)
     if report is None:
         return False
-    await context.bot.send_message(
-        chat_id=user["user_id"],
-        text=report.text,
-        parse_mode="HTML",
-        reply_markup=report.reply_markup,
-    )
+    await _send_report(context, user["user_id"], report)
     return True
 
 

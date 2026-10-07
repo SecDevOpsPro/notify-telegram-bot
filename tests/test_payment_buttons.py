@@ -157,21 +157,36 @@ def _callbacks(keyboard: InlineKeyboardMarkup) -> list[str | None]:
 
 
 def test_fines_keyboard_offers_driver_and_plate_when_both_found_fines():
-    keyboard = build_fines_keyboard(licence=_units(_FINE), plate=_units(_FINE))
+    keyboard = build_fines_keyboard(licence=_units(_FINE), plates={"CB1234AB": _units(_FINE)})
 
     assert keyboard is not None
-    assert _callbacks(keyboard) == ["cmd:driver", "cmd:plate"]
+    assert _callbacks(keyboard) == ["cmd:driver", "cmd:plate:CB1234AB"]
 
 
 def test_fines_keyboard_only_offers_the_lookup_that_found_fines():
-    only_licence = build_fines_keyboard(licence=_units(_FINE), plate=_units())
-    only_plate = build_fines_keyboard(licence=[], plate=_units(_FINE))
+    only_licence = build_fines_keyboard(licence=_units(_FINE), plates={"CB1234AB": _units()})
+    only_plate = build_fines_keyboard(
+        licence=[], plates={"CB1234AB": _units(), "PB5678CD": _units(_FINE)}
+    )
 
     assert only_licence is not None and only_plate is not None
     assert _callbacks(only_licence) == ["cmd:driver"]
-    assert _callbacks(only_plate) == ["cmd:plate"]
+    assert _callbacks(only_plate) == ["cmd:plate:PB5678CD"]
 
 
 def test_fines_keyboard_is_none_when_no_fines():
-    assert build_fines_keyboard(licence=_units(), plate=[]) is None
-    assert build_fines_keyboard(licence=[], plate=[]) is None
+    assert build_fines_keyboard(licence=_units(), plates={"CB1234AB": []}) is None
+    assert build_fines_keyboard(licence=[], plates={}) is None
+
+
+def test_fines_keyboard_wraps_several_plates_two_per_row():
+    keyboard = build_fines_keyboard(
+        licence=_units(_FINE),
+        plates={"CB1234AB": _units(_FINE), "PB5678CD": _units(_FINE)},
+    )
+
+    assert keyboard is not None
+    assert [[b.callback_data for b in row] for row in keyboard.inline_keyboard] == [
+        ["cmd:driver", "cmd:plate:CB1234AB"],
+        ["cmd:plate:PB5678CD"],
+    ]

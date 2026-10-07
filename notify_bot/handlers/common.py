@@ -45,17 +45,22 @@ _ALL_COMMANDS_PUBLIC = """
 /change  — EUR exchange rates (Cuba)
 
 <b>After approval:</b>
-/enroll   — Save your personal data (ID, licence, plate)
-/unenroll — Delete your saved profile data
+/enroll   — Save your personal data (ID, licence, main vehicle)
+/myinfo   — Show your saved data and vehicles
+/unenroll — Delete your saved profile data and vehicles
+/vehicles — List your vehicles, choose the main one, remove one
+/addvehicle — Add another vehicle (up to a maximum)
 /driver   — Check driving licence obligations (MVR)
-/plate    — Check vehicle obligations (MVR)
+/plate    — Check vehicle obligations (MVR) — also: /plate &lt;plate&gt;
 /vignette — Check road e-vignette (bgtoll.bg) — also: /vignette &lt;plate&gt;
 /sticker  — Check Sofia parking sticker (sofiatraffic.bg) — also: /sticker &lt;plate&gt;
 /clamp    — Check wheel-clamp status (sofiatraffic.bg) — also: /clamp &lt;plate&gt;
 /gtp      — Check technical inspection (plate + talon) — also: /gtp &lt;plate&gt; &lt;talon&gt;
 /mtpl     — Check civil liability insurance — also: /mtpl &lt;plate&gt;
 /fines    — Check traffic fines (KAT)
-/vehicle  — Show vehicle registration data (plate + talon required)
+/vehicle  — Show vehicle registration data (plate + talon required) — also: /vehicle &lt;plate&gt;
+
+Plate commands without a plate use your main vehicle.
 """
 
 _ALL_COMMANDS_ADMIN = """
@@ -115,8 +120,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         has_profile = bool(
             profile
             and any(
-                profile.get(field)
-                for field in ("national_id", "driving_licence", "vehicle_plate", "talon_no")
+                profile.get(field) for field in ("national_id", "driving_licence", "vehicle_plate")
             )
         )
         if has_profile:

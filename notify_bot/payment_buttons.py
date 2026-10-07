@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from telegram import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -43,16 +43,22 @@ def build_copy_keyboard(details: PaymentDetails | None) -> InlineKeyboardMarkup 
 
 
 def build_fines_keyboard(
-    *, licence: Iterable[Obligation], plate: Iterable[Obligation]
+    *, licence: Iterable[Obligation], plates: Mapping[str, Iterable[Obligation]]
 ) -> InlineKeyboardMarkup | None:
-    """Daily-report buttons that run /driver and /plate, each shown only if its lookup found fines.
+    """Daily-report buttons that run /driver and /plate <plate>, each shown only if its
+    lookup found fines.
 
     The report itself stays compact; a tap sends the per-fine messages with their
-    copy buttons. The ``cmd:`` callbacks are the /help menu's (``menu.menu_callback``).
+    copy buttons. The ``cmd:`` callbacks are the /help menu's (``menu.menu_callback``),
+    which passes a third ``:``-separated part on as the command's argument.
     """
     buttons = []
     if any(unit.has_obligations for unit in licence):
         buttons.append(InlineKeyboardButton("🚗 Driver fines", callback_data="cmd:driver"))
-    if any(unit.has_obligations for unit in plate):
-        buttons.append(InlineKeyboardButton("🚙 Plate fines", callback_data="cmd:plate"))
-    return InlineKeyboardMarkup([buttons]) if buttons else None
+    for plate, units in plates.items():
+        if any(unit.has_obligations for unit in units):
+            buttons.append(
+                InlineKeyboardButton(f"🚙 {plate} fines", callback_data=f"cmd:plate:{plate}")
+            )
+    rows = [buttons[i : i + _BUTTONS_PER_ROW] for i in range(0, len(buttons), _BUTTONS_PER_ROW)]
+    return InlineKeyboardMarkup(rows) if rows else None

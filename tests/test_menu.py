@@ -222,6 +222,38 @@ async def test_menu_callback_answers_and_dispatches_to_matching_handler():
 
 
 @pytest.mark.asyncio
+async def test_menu_callback_passes_a_third_part_on_as_the_command_argument():
+    """The daily report's per-plate fine buttons are "cmd:plate:<plate>"."""
+    fake_handler = AsyncMock()
+    update = _make_callback_update(10, "cmd:plate:CB1234AB")
+    context = MagicMock()
+
+    with patch(
+        "notify_bot.handlers.menu._dispatch_table",
+        return_value={"plate": fake_handler},
+    ):
+        await menu.menu_callback(update, context)
+
+    fake_handler.assert_awaited_once()
+    assert context.args == ["CB1234AB"]
+
+
+def test_keyboard_enrolled_user_can_open_vehicles():
+    phase = {"is_approved": True, "has_profile": True, "is_admin": False}
+
+    assert "cmd:vehicles" in _callback_data(menu.build_help_keyboard(phase))
+
+
+def test_every_menu_button_has_a_dispatch_target():
+    phase = {"is_approved": True, "has_profile": True, "is_admin": True}
+    table = menu._dispatch_table()
+    for data in _callback_data(menu.build_help_keyboard(phase)):
+        # "cmd:enroll" is an entry point of the /enroll ConversationHandler instead.
+        if data.startswith("cmd:") and data != "cmd:enroll":
+            assert data.removeprefix("cmd:") in table, data
+
+
+@pytest.mark.asyncio
 async def test_menu_callback_skips_dispatch_when_message_is_inaccessible():
     """Telegram reports an old message as inaccessible — it has no reply_* methods,
     so the handler must not be run against it (it would crash on reply_html)."""

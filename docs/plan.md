@@ -270,7 +270,7 @@ flowchart TD
     VI --> C["wheel clamp"]
     C --> V
     V -- done --> R["message 1: personal checks + main vehicle;<br/>one more message per other vehicle"]
-    R --> K["buttons on the last message: fines shortcuts +<br/>a Retry button per failed check"]
+    R --> K["each message gets its own checks' buttons:<br/>fines shortcuts + a Retry button per failed check"]
     K --> S["send_message to user"]
 ```
 

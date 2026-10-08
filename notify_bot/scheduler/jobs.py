@@ -147,31 +147,33 @@ async def _retry[T](
 
 @dataclass(frozen=True, slots=True)
 class _Report:
-    """One user's daily report: its entries plus the fine shortcuts and retry buttons.
+    """One user's daily report: one message per entry, each with its own buttons.
 
     The first entry is the greeting with the personal checks (fines, licence)
     and the main vehicle's sections; each one after it is another vehicle's.
-    Each entry is sent as its own message.
+    ``keyboards[i]`` holds the fine shortcuts and retry buttons for
+    ``entries[i]``'s checks, so a button sits under the section it acts on.
     """
 
     entries: tuple[str, ...]
-    reply_markup: InlineKeyboardMarkup | None
+    keyboards: tuple[InlineKeyboardMarkup | None, ...]
 
     @property
     def text(self) -> str:
         """The whole report as one string."""
         return "\n\n".join(self.entries)
 
+    @property
+    def buttons(self) -> list[InlineKeyboardButton]:
+        """Every button across the report's messages, in order."""
+        return [b for kb in self.keyboards if kb for row in kb.inline_keyboard for b in row]
+
 
 async def _send_report(context: ContextTypes.DEFAULT_TYPE, chat_id: int, report: _Report) -> None:
-    """Send *report* one entry per message; its buttons go on the last one."""
-    for i, text in enumerate(report.entries):
-        last = i == len(report.entries) - 1
+    """Send *report* one entry per message, each with its own buttons."""
+    for text, keyboard in zip(report.entries, report.keyboards, strict=True):
         await context.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            parse_mode="HTML",
-            reply_markup=report.reply_markup if last else None,
+            chat_id=chat_id, text=text, parse_mode="HTML", reply_markup=keyboard
         )
 
 
@@ -197,7 +199,8 @@ async def _build_report(user: ReportTarget) -> _Report | None:
     sections: list[str] = []
     licence_units: list[Obligation] = []  # decide which /driver, /plate buttons the report gets
     plate_units: dict[str, list[Obligation]] = {}
-    retries: list[InlineKeyboardButton] = []  # one per failed check
+    # One per failed check, by plate (None for the personal checks).
+    retries: dict[str | None, list[InlineKeyboardButton]] = {}
 
     calls_made = False
 
@@ -226,7 +229,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
         except BoleronError as exc:
             logger.warning("Fines check failed for user %s: %s", uid, exc)
             fines_section = _check_failed(uid, "🚔 <b>Traffic Fines:</b>", exc)
-            retries.append(_retry_button("Retry fines", "fines"))
+            retries.setdefault(None, []).append(_retry_button("Retry fines", "fines"))
         sections.append(fines_section)
 
     if national_id and licence:
@@ -239,7 +242,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
         except MVRApiError as exc:
             logger.warning("Licence check failed for user %s: %s", uid, exc)
             sections.append(_check_failed(uid, "🪪 <b>By driving licence:</b>", exc))
-            retries.append(_retry_button("Retry driver", "driver"))
+            retries.setdefault(None, []).append(_retry_button("Retry driver", "driver"))
 
     vehicle_starts: list[int] = []  # where each vehicle's sections begin
     for vehicle in user["vehicles"]:
@@ -258,7 +261,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
             except MVRApiError as exc:
                 logger.warning("Plate check failed for user %s (%s): %s", uid, plate, exc)
                 sections.append(_check_failed(uid, plate_title, exc))
-                retries.append(_retry_button("Retry plate", "plate", plate))
+                retries.setdefault(plate, []).append(_retry_button("Retry plate", "plate", plate))
 
         gtp_title = f"🔧 <b>Technical Inspection ({plate}):</b>"
         if not talon:
@@ -277,7 +280,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
             except BoleronError as exc:
                 logger.warning("GTP check failed for user %s (%s): %s", uid, plate, exc)
                 sections.append(_check_failed(uid, gtp_title, exc))
-                retries.append(_retry_button("Retry GTP", "gtp", plate))
+                retries.setdefault(plate, []).append(_retry_button("Retry GTP", "gtp", plate))
 
         mtpl_title = f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>"
         try:
@@ -298,7 +301,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
         except BoleronError as exc:
             logger.warning("MTPL check failed for user %s (%s): %s", uid, plate, exc)
             sections.append(_check_failed(uid, mtpl_title, exc))
-            retries.append(_retry_button("Retry MTPL", "mtpl", plate))
+            retries.setdefault(plate, []).append(_retry_button("Retry MTPL", "mtpl", plate))
 
         vignette_title = f"🛣️ <b>Vignette ({plate}):</b>"
         try:
@@ -341,7 +344,9 @@ async def _build_report(user: ReportTarget) -> _Report | None:
             except BoleronError as exc:
                 logger.warning("Boleron vignette fallback failed for user %s: %s", uid, exc)
                 sections.append(_check_failed(uid, vignette_title, exc))
-                retries.append(_retry_button("Retry vignette", "vignette", plate))
+                retries.setdefault(plate, []).append(
+                    _retry_button("Retry vignette", "vignette", plate)
+                )
 
         clamp_title = f"🔒 <b>Wheel clamp ({plate}):</b>"
         try:
@@ -357,23 +362,29 @@ async def _build_report(user: ReportTarget) -> _Report | None:
         except (SofiaCloudflareError, SofiaTrafficError) as exc:
             logger.warning("Clamp check failed for user %s (%s): %s", uid, plate, exc)
             sections.append(_check_failed(uid, clamp_title, exc))
-            retries.append(_retry_button("Retry clamp", "clamp", plate))
+            retries.setdefault(plate, []).append(_retry_button("Retry clamp", "clamp", plate))
 
     if not sections:
         return None
 
-    # One entry for the personal checks + the main vehicle, then one per other vehicle.
+    # One message for the personal checks + the main vehicle, then one per other
+    # vehicle; each gets the buttons for its own checks.
+    plates: list[str | None] = [v["plate"] for v in user["vehicles"]]
+    groups = [[None, *plates[:1]], *([p] for p in plates[1:])]
     bounds = [0, *vehicle_starts[1:], len(sections)]
-    entries = [
-        "\n\n".join(sections[a:b]) for a, b in zip(bounds, bounds[1:], strict=False) if a < b
-    ]
+    entries = ["\n\n".join(sections[a:b]) for a, b in zip(bounds, bounds[1:], strict=False)]
     entries[0] = f"☀️ Good morning, {name}!\n\n{entries[0]}"
-    return _Report(
-        entries=tuple(entries),
-        reply_markup=_report_keyboard(
-            build_fines_keyboard(licence=licence_units, plates=plate_units), retries
-        ),
-    )
+    keyboards = [
+        _report_keyboard(
+            build_fines_keyboard(
+                licence=licence_units if None in group else [],
+                plates={p: plate_units[p] for p in group if p in plate_units},
+            ),
+            [b for key in group for b in retries.get(key, [])],
+        )
+        for group in groups
+    ]
+    return _Report(entries=tuple(entries), keyboards=tuple(keyboards))
 
 
 async def _send_user_report(context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -478,9 +478,7 @@ async def _callbacks(**patches) -> list[str | None]:
     with _patched(**patches):
         report = await _build_report(_FULL_USER)
     assert report is not None
-    if report.reply_markup is None:
-        return []
-    return [b.callback_data for row in report.reply_markup.inline_keyboard for b in row]
+    return [b.callback_data for b in report.buttons]
 
 
 @pytest.mark.asyncio
@@ -517,8 +515,8 @@ async def test_report_never_carries_copy_buttons():
     """Copy buttons live in the per-fine messages /driver and /plate send, not the report."""
     with _patched(licence=AsyncMock(return_value=[_FINE_GROUP])):
         report = await _build_report(_FULL_USER)
-    assert report is not None and report.reply_markup is not None
-    assert not any(b.copy_text for row in report.reply_markup.inline_keyboard for b in row)
+    assert report is not None and report.buttons
+    assert not any(b.copy_text for b in report.buttons)
 
 
 @pytest.mark.asyncio
@@ -637,9 +635,8 @@ async def test_every_vehicle_is_checked_preferred_first():
 async def test_failed_checks_get_retry_buttons_naming_their_plate():
     with _patched(mtpl=AsyncMock(side_effect=BoleronError("boom"))):
         report = await _build_report(_TWO_VEHICLES)
-    assert report is not None and report.reply_markup is not None
-    buttons = [b for row in report.reply_markup.inline_keyboard for b in row]
-    assert [(b.text, b.callback_data) for b in buttons] == [
+    assert report is not None
+    assert [(b.text, b.callback_data) for b in report.buttons] == [
         (f"🔁 Retry MTPL {PLATE}", f"cmd:mtpl:{PLATE}"),
         (f"🔁 Retry MTPL {OTHER_PLATE}", f"cmd:mtpl:{OTHER_PLATE}"),
     ]
@@ -652,9 +649,8 @@ async def test_report_offers_a_fines_button_per_plate_with_fines():
 
     with _patched(plate=AsyncMock(side_effect=by_plate)):
         report = await _build_report(_TWO_VEHICLES)
-    assert report is not None and report.reply_markup is not None
-    callbacks = [b.callback_data for row in report.reply_markup.inline_keyboard for b in row]
-    assert callbacks == [f"cmd:plate:{OTHER_PLATE}"]
+    assert report is not None
+    assert [b.callback_data for b in report.buttons] == [f"cmd:plate:{OTHER_PLATE}"]
 
 
 @pytest.mark.asyncio
@@ -689,14 +685,35 @@ async def test_single_vehicle_report_is_one_message():
 
 
 @pytest.mark.asyncio
-async def test_split_report_puts_buttons_on_the_last_message_only():
+async def test_each_message_carries_the_buttons_for_its_own_checks():
+    async def by_plate(*, national_id, plate_number):
+        return [_FINE_GROUP] if plate_number == OTHER_PLATE else []
+
+    with _patched(
+        licence=AsyncMock(side_effect=MVRApiError("boom")),
+        plate=AsyncMock(side_effect=by_plate),
+        mtpl=AsyncMock(side_effect=BoleronError("boom")),
+    ):
+        report = await _build_report(_TWO_VEHICLES)
+    assert report is not None
+    first, second = (
+        [b.callback_data for row in (kb.inline_keyboard if kb else ()) for b in row]
+        for kb in report.keyboards
+    )
+    assert first == ["cmd:driver", f"cmd:mtpl:{PLATE}"]
+    assert second == [f"cmd:plate:{OTHER_PLATE}", f"cmd:mtpl:{OTHER_PLATE}"]
+
+
+@pytest.mark.asyncio
+async def test_send_report_sends_each_entry_with_its_own_keyboard():
     context = MagicMock()
     context.bot.send_message = AsyncMock()
-    markup = MagicMock()
-    entries = tuple("s" * 3000 for _ in range(3))
+    first, second = MagicMock(), MagicMock()
 
-    await _send_report(context, 1, _Report(entries=entries, reply_markup=markup))
+    await _send_report(
+        context, 1, _Report(entries=("a", "b", "c"), keyboards=(first, None, second))
+    )
 
     calls = context.bot.send_message.call_args_list
-    assert [c.kwargs["text"] for c in calls] == list(entries)
-    assert [c.kwargs["reply_markup"] for c in calls] == [None, None, markup]
+    assert [c.kwargs["text"] for c in calls] == ["a", "b", "c"]
+    assert [c.kwargs["reply_markup"] for c in calls] == [first, None, second]

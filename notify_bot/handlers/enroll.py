@@ -158,16 +158,22 @@ async def enroll_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     (which resolves correctly for both) rather than `.message`.
     """
     await _ack_callback(update)
+    # Looked up once: whether the vehicle steps run is fixed for this whole run.
+    _user_data(context)[_HAS_VEHICLES_KEY] = bool(await db.list_vehicles(_uid(update)))
     return await _ask_national_id(update, context)
 
 
-async def _has_vehicles(user_id: int) -> bool:
-    return bool(await db.list_vehicles(user_id))
+_HAS_VEHICLES_KEY = "enroll_has_vehicles"
 
 
-async def _step(user_id: int, step: int) -> str:
+def _has_vehicles(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Whether the user had a vehicle when this run started (see ``enroll_start``)."""
+    return bool(_user_data(context).get(_HAS_VEHICLES_KEY))
+
+
+def _step(context: ContextTypes.DEFAULT_TYPE, step: int) -> str:
     """The "Step n of N" heading — only 2 steps once the user has a vehicle."""
-    total = 2 if await _has_vehicles(user_id) else 4
+    total = 2 if _has_vehicles(context) else 4
     return f"📋 <b>Enrollment Wizard</b> — Step {step} of {total}"
 
 
@@ -176,7 +182,7 @@ async def _ask_national_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     hint, keyboard = _skip_hint_and_keyboard(bool(raw), has_back=False)
 
     await _reply_target(update).reply_html(
-        f"{await _step(_uid(update), 1)}\n\n"
+        f"{_step(context, 1)}\n\n"
         f"Current National ID: {_format_current(raw, is_saved)}\n\n"
         f"Please enter your <b>National ID (EGN)</b> — 10 digits.\n{hint}",
         reply_markup=keyboard,
@@ -223,7 +229,7 @@ async def _ask_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     hint, keyboard = _skip_hint_and_keyboard(bool(raw), has_back=True)
 
     await _reply_target(update).reply_html(
-        f"{await _step(_uid(update), 2)}\n\n"
+        f"{_step(context, 2)}\n\n"
         f"Current Driving Licence: {_format_current(raw, is_saved)}\n\n"
         "Please enter your <b>Driving Licence number</b> (digits only, or 2 letters + 7 digits "
         f"e.g. <code>DA2123456</code>).\n{hint}",
@@ -272,7 +278,7 @@ async def back_to_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def _after_licence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Go on to the vehicle steps, or finish if the user already has a vehicle."""
-    if await _has_vehicles(_uid(update)):
+    if _has_vehicles(context):
         return await _save_and_confirm(update, context)
     return await _ask_plate(update, context)
 
@@ -374,6 +380,7 @@ async def _save_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     licence = user_data.pop("enroll_licence", None)
     plate = user_data.pop("enroll_plate", None)
     talon = user_data.pop("enroll_talon", None)
+    user_data.pop(_HAS_VEHICLES_KEY, None)
 
     try:
         await db.upsert_profile(uid, national_id=national_id, driving_licence=licence)
@@ -426,7 +433,13 @@ async def _save_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await _ack_callback(update)
     user_data = _user_data(context)
-    for key in ("enroll_national_id", "enroll_licence", "enroll_plate", "enroll_talon"):
+    for key in (
+        "enroll_national_id",
+        "enroll_licence",
+        "enroll_plate",
+        "enroll_talon",
+        _HAS_VEHICLES_KEY,
+    ):
         user_data.pop(key, None)
     await _reply_target(update).reply_text(
         "Enrollment cancelled.  Your existing data is unchanged."

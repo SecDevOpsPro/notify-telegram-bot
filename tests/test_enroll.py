@@ -431,12 +431,12 @@ async def test_saved_db_value_is_not_flagged_as_unsaved():
 
 
 @pytest.mark.asyncio
-async def test_re_enrolling_with_a_vehicle_stops_after_licence_and_keeps_vehicles(_vehicles):
-    _vehicles.return_value = [{"plate": "CB1234AB", "talon_no": "123456"}]
+async def test_re_enrolling_with_a_vehicle_stops_after_licence_and_keeps_vehicles():
     update = _make_update()
     update.message.text = "DA2123456"
     context = MagicMock()
-    context.user_data = {"enroll_national_id": "1234567890"}
+    # enroll_start found a saved vehicle.
+    context.user_data = {"enroll_national_id": "1234567890", "enroll_has_vehicles": True}
     upsert_profile = AsyncMock()
     save_vehicle = AsyncMock()
 

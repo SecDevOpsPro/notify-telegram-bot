@@ -6,6 +6,12 @@ Guidance for AI coding agents working in this repository.
 > changes a core convention (e.g. the DB connection model, error handling,
 > access control), or alters setup/test/lint commands, update the relevant
 > section of this file in the same change — don't leave it to a separate ask.
+>
+> **Keep the diagrams current too.** Adding, removing or moving a module,
+> command, service or table changes the architecture: update the Mermaid
+> diagrams and structure trees in `README.md` (Architecture, Project Structure)
+> and `docs/plan.md` (Architecture Overview, Package Structure, Database
+> Schema) in the same change.
 
 ## What this is
 
@@ -48,7 +54,7 @@ notify_bot/
   errors.py        format_error() — verbose detail for admin/debug users only
   formatting.py    align_fields() — label/value rows that line up in Telegram's proportional font
   payment_buttons.py  build_copy_keyboard() — tap-to-copy (copy_text) buttons for one fine's IBAN/BIC/reason/amount;
-                   build_fines_keyboard() — the daily report's /driver and /plate shortcut buttons
+                   build_fines_keyboard() — the daily report's /driver and per-plate /plate shortcut buttons
   middlewares.py   @require_approved decorator
   updates.py       require() to narrow PTB's optional Update fields; HandlerCallback type
   handlers/        one module per command group
@@ -66,6 +72,12 @@ wired up in `run_bot.py`.
   connection-per-call or a pool. Read the module docstring in `db.py`
   before touching connection handling — this was a deliberate fix for a
   concurrency bug, not an oversight.
+- **Vehicles and the main vehicle.** A user has up to `db.MAX_VEHICLES` rows
+  in `user_vehicles`; `user_profiles.vehicle_plate` names the main
+  (preferred) one. Change it only through the `db` vehicle functions
+  (`save_vehicle`, `set_preferred_vehicle`, `delete_vehicle`), which keep it
+  pointing at an existing vehicle. Plate commands resolve their plate with
+  `obligations._pick_vehicle` (argument, else main vehicle).
 - **Async everywhere.** HTTP calls use `httpx` (async), never `requests`,
   to avoid blocking the event loop.
 - **Error visibility split.** `errors.format_error()` gives full exception
@@ -83,7 +95,7 @@ wired up in `run_bot.py`.
   `context.user_data` as optional — narrow them once at the top of a handler
   with `require(update.message, "message")` (`updates.py`) rather than
   dereferencing them directly or adding `# type: ignore`. DB rows are
-  `TypedDict`s (`db.UserRow`, `db.ProfileRow`, `db.ReportTarget`), not bare
+  `TypedDict`s (`db.UserRow`, `db.ProfileRow`, `db.VehicleRow`, `db.ReportTarget`), not bare
   `dict`s; use `HandlerCallback[T]` to annotate decorators that wrap handlers.
 - **Service API shape.** A `services/` function taking two same-typed
   credential strings (EGN vs licence number, plate vs talon) takes them

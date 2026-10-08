@@ -237,7 +237,7 @@ async def brief_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         user = await db.get_user(target_id)
-        profile = await db.get_profile(target_id)
+        data = await db.get_report_target(target_id)
     except Exception as exc:
         logger.exception("Failed to load user/profile for user_id=%s", target_id)
         await message.reply_html(
@@ -252,20 +252,9 @@ async def brief_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not user or user["status"] != "approved":
         await message.reply_text("❌ That user is not approved.")
         return
-    if not profile or not (
-        profile.get("national_id") or profile.get("driving_licence") or profile.get("vehicle_plate")
-    ):
+    if data is None:
         await message.reply_text("❌ That user has no profile data saved.")
         return
-
-    data: db.ReportTarget = {
-        "user_id": target_id,
-        "first_name": user.get("first_name"),
-        "national_id": profile.get("national_id"),
-        "driving_licence": profile.get("driving_licence"),
-        "vehicle_plate": profile.get("vehicle_plate"),
-        "talon_no": profile.get("talon_no"),
-    }
 
     await message.reply_text(f"⏳ Running report for <code>{target_id}</code>…", parse_mode="HTML")
     try:

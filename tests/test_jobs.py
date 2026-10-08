@@ -10,7 +10,9 @@ import pytest
 
 from notify_bot.scheduler.jobs import (
     _build_report,
+    _Report,
     _retry,
+    _send_report,
     daily_obligations_report,
     send_user_report_now,
 )
@@ -26,14 +28,26 @@ from notify_bot.services.mvr import MVRApiError, Obligation
 from notify_bot.services.sofiatraffic import ClampInfo, SofiaTrafficError
 
 PLATE = "XH2856"
+OTHER_PLATE = "CB1234AB"
+
+
+def _vehicle(plate: str, talon: str | None, vehicle_id: int = 1) -> dict:
+    return {
+        "id": vehicle_id,
+        "user_id": 1,
+        "plate": plate,
+        "talon_no": talon,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+
 
 _FULL_USER = {
     "user_id": 1,
     "first_name": "Test",
     "national_id": "1234567890",
     "driving_licence": "123456789",
-    "vehicle_plate": PLATE,
-    "talon_no": "009999999",
+    "vehicles": [_vehicle(PLATE, "009999999")],
 }
 
 
@@ -146,7 +160,7 @@ async def test_report_is_none_when_user_has_no_identifiers():
         "first_name": "Test",
         "national_id": None,
         "driving_licence": None,
-        "vehicle_plate": None,
+        "vehicles": [],
     }
     with _patched():
         message = await _report_text(user)
@@ -195,7 +209,10 @@ async def test_licence_obligations_section_hidden_when_clean():
 async def test_licence_check_failure_shows_error_line():
     with _patched(licence=AsyncMock(side_effect=MVRApiError("MVR API returned HTTP 500"))):
         message = await _report_text(_FULL_USER)
-    assert "🪪 <b>By driving licence:</b>\n⚠️ Check failed — try /driver later." in message
+    assert (
+        "🪪 <b>By driving licence:</b>\n⚠️ Check failed — tap its 🔁 button below to retry."
+        in message
+    )
 
 
 @pytest.mark.asyncio
@@ -209,7 +226,7 @@ async def test_plate_obligations_section_included_when_obligations_found():
     ]
     with _patched(plate=AsyncMock(return_value=units)):
         message = await _report_text(_FULL_USER)
-    assert "🚗 <b>By vehicle plate (MVR):</b>" in message
+    assert f"🚗 <b>By vehicle plate {PLATE} (MVR):</b>" in message
 
 
 @pytest.mark.asyncio
@@ -221,14 +238,17 @@ async def test_plate_obligations_section_hidden_when_clean():
     ]
     with _patched(plate=AsyncMock(return_value=units)):
         message = await _report_text(_FULL_USER)
-    assert "🚗 <b>By vehicle plate (MVR):</b>" not in message
+    assert "🚗 <b>By vehicle plate" not in message
 
 
 @pytest.mark.asyncio
 async def test_plate_check_failure_shows_error_line():
     with _patched(plate=AsyncMock(side_effect=MVRApiError("boom"))):
         message = await _report_text(_FULL_USER)
-    assert "🚗 <b>By vehicle plate (MVR):</b>\n⚠️ Check failed — try /plate later." in message
+    assert (
+        f"🚗 <b>By vehicle plate {PLATE} (MVR):</b>\n⚠️ Check failed — tap its 🔁 button below"
+        in message
+    )
 
 
 # ── Vignette section ──────────────────────────────────────────────────────────
@@ -321,7 +341,10 @@ async def test_report_includes_wheel_clamp_section_when_clamped():
 async def test_clamp_error_shows_failed_section():
     with _patched(clamp=AsyncMock(side_effect=SofiaTrafficError("blocked"))):
         message = await _report_text(_FULL_USER)
-    assert f"🔒 <b>Wheel clamp ({PLATE}):</b>\n⚠️ Check failed — try /clamp later." in message
+    assert (
+        f"🔒 <b>Wheel clamp ({PLATE}):</b>\n⚠️ Check failed — tap its 🔁 button below to retry."
+        in message
+    )
     assert message.count("Check failed") == 1
 
 
@@ -406,7 +429,7 @@ async def test_report_sections_in_order():
     headers = [
         "🚔 <b>Traffic Fines:",
         "🪪 <b>By driving licence:",
-        "🚗 <b>By vehicle plate (MVR):",
+        f"🚗 <b>By vehicle plate {PLATE} (MVR):",
         "🔧 <b>Technical Inspection",
         "🛡️ <b>Civil Liability",
         "🛣️ <b>Vignette",
@@ -455,9 +478,7 @@ async def _callbacks(**patches) -> list[str | None]:
     with _patched(**patches):
         report = await _build_report(_FULL_USER)
     assert report is not None
-    if report.reply_markup is None:
-        return []
-    return [b.callback_data for row in report.reply_markup.inline_keyboard for b in row]
+    return [b.callback_data for b in report.buttons]
 
 
 @pytest.mark.asyncio
@@ -467,7 +488,7 @@ async def test_report_offers_driver_button_when_licence_lookup_found_fines():
 
 @pytest.mark.asyncio
 async def test_report_offers_plate_button_when_plate_lookup_found_fines():
-    assert await _callbacks(plate=AsyncMock(return_value=[_FINE_GROUP])) == ["cmd:plate"]
+    assert await _callbacks(plate=AsyncMock(return_value=[_FINE_GROUP])) == [f"cmd:plate:{PLATE}"]
 
 
 @pytest.mark.asyncio
@@ -476,7 +497,7 @@ async def test_report_offers_both_buttons_when_both_lookups_found_fines():
         licence=AsyncMock(return_value=[_FINE_GROUP]),
         plate=AsyncMock(return_value=[_FINE_GROUP]),
     )
-    assert callbacks == ["cmd:driver", "cmd:plate"]
+    assert callbacks == ["cmd:driver", f"cmd:plate:{PLATE}"]
 
 
 @pytest.mark.asyncio
@@ -485,8 +506,8 @@ async def test_report_has_no_buttons_when_lookups_found_no_fines():
 
 
 @pytest.mark.asyncio
-async def test_report_has_no_buttons_when_the_lookup_failed():
-    assert await _callbacks(licence=AsyncMock(side_effect=MVRApiError("boom"))) == []
+async def test_failed_lookup_gets_a_retry_button_instead_of_a_fines_button():
+    assert await _callbacks(licence=AsyncMock(side_effect=MVRApiError("boom"))) == ["cmd:driver"]
 
 
 @pytest.mark.asyncio
@@ -494,8 +515,8 @@ async def test_report_never_carries_copy_buttons():
     """Copy buttons live in the per-fine messages /driver and /plate send, not the report."""
     with _patched(licence=AsyncMock(return_value=[_FINE_GROUP])):
         report = await _build_report(_FULL_USER)
-    assert report is not None and report.reply_markup is not None
-    assert not any(b.copy_text for row in report.reply_markup.inline_keyboard for b in row)
+    assert report is not None and report.buttons
+    assert not any(b.copy_text for b in report.buttons)
 
 
 @pytest.mark.asyncio
@@ -530,7 +551,7 @@ async def test_send_user_report_now_returns_false_when_nothing_to_report():
         "first_name": "Test",
         "national_id": None,
         "driving_licence": None,
-        "vehicle_plate": None,
+        "vehicles": [],
     }
     context = MagicMock()
     context.bot.send_message = AsyncMock()
@@ -578,9 +599,121 @@ async def test_gtp_passes_plate_and_talon():
 async def test_gtp_without_talon_shows_section_asking_for_it():
     gtp = AsyncMock()
     with _patched(gtp=gtp):
-        message = await _report_text({**_FULL_USER, "talon_no": None})
+        message = await _report_text({**_FULL_USER, "vehicles": [_vehicle(PLATE, None)]})
     gtp.assert_not_awaited()
     assert (
-        f"🔧 <b>Technical Inspection ({PLATE}):</b>\n⚠️ Talon number missing — save it with /enroll."
-        in message
+        f"🔧 <b>Technical Inspection ({PLATE}):</b>\n"
+        "⚠️ Talon number missing — save it with /vehicles." in message
     )
+
+
+# ── Several vehicles ──────────────────────────────────────────────────────────
+
+_TWO_VEHICLES = {
+    **_FULL_USER,
+    "vehicles": [_vehicle(PLATE, "009999999", 1), _vehicle(OTHER_PLATE, "008888888", 2)],
+}
+
+
+@pytest.mark.asyncio
+async def test_every_vehicle_is_checked_preferred_first():
+    gtp = AsyncMock(return_value=GtpInfo(found=False))
+    mtpl = AsyncMock(return_value=MtplInfo(active=False))
+    plate = AsyncMock(return_value=[])
+    with _patched(gtp=gtp, mtpl=mtpl, plate=plate):
+        message = await _report_text(_TWO_VEHICLES)
+    assert [c.kwargs for c in gtp.await_args_list] == [
+        {"car_no": PLATE, "talon_no": "009999999"},
+        {"car_no": OTHER_PLATE, "talon_no": "008888888"},
+    ]
+    assert [c.args for c in mtpl.await_args_list] == [(PLATE,), (OTHER_PLATE,)]
+    assert [c.kwargs["plate_number"] for c in plate.await_args_list] == [PLATE, OTHER_PLATE]
+    assert message.index(f"MTPL ({PLATE})") < message.index(f"MTPL ({OTHER_PLATE})")
+
+
+@pytest.mark.asyncio
+async def test_failed_checks_get_retry_buttons_naming_their_plate():
+    with _patched(mtpl=AsyncMock(side_effect=BoleronError("boom"))):
+        report = await _build_report(_TWO_VEHICLES)
+    assert report is not None
+    assert [(b.text, b.callback_data) for b in report.buttons] == [
+        (f"🔁 Retry MTPL {PLATE}", f"cmd:mtpl:{PLATE}"),
+        (f"🔁 Retry MTPL {OTHER_PLATE}", f"cmd:mtpl:{OTHER_PLATE}"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_report_offers_a_fines_button_per_plate_with_fines():
+    async def by_plate(*, national_id, plate_number):
+        return [_FINE_GROUP] if plate_number == OTHER_PLATE else []
+
+    with _patched(plate=AsyncMock(side_effect=by_plate)):
+        report = await _build_report(_TWO_VEHICLES)
+    assert report is not None
+    assert [b.callback_data for b in report.buttons] == [f"cmd:plate:{OTHER_PLATE}"]
+
+
+@pytest.mark.asyncio
+async def test_vehicle_checks_without_national_id_skip_only_the_mvr_lookup():
+    plate = AsyncMock(return_value=[])
+    mtpl = AsyncMock(return_value=MtplInfo(active=False))
+    with _patched(plate=plate, mtpl=mtpl):
+        await _report_text({**_TWO_VEHICLES, "national_id": None})
+    plate.assert_not_awaited()
+    assert mtpl.await_count == 2
+
+
+# ── Splitting long reports ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_personal_checks_and_main_vehicle_share_the_first_message():
+    with _patched(mtpl=AsyncMock(return_value=MtplInfo(active=False))):
+        report = await _build_report(_TWO_VEHICLES)
+    assert report is not None and len(report.entries) == 2
+    first, second = report.entries
+    assert first.startswith("☀️ Good morning")
+    assert "Traffic Fines" in first and f"({PLATE})" in first and OTHER_PLATE not in first
+    assert f"({OTHER_PLATE})" in second and PLATE not in second
+
+
+@pytest.mark.asyncio
+async def test_single_vehicle_report_is_one_message():
+    with _patched():
+        report = await _build_report(_FULL_USER)
+    assert report is not None and len(report.entries) == 1
+
+
+@pytest.mark.asyncio
+async def test_each_message_carries_the_buttons_for_its_own_checks():
+    async def by_plate(*, national_id, plate_number):
+        return [_FINE_GROUP] if plate_number == OTHER_PLATE else []
+
+    with _patched(
+        licence=AsyncMock(side_effect=MVRApiError("boom")),
+        plate=AsyncMock(side_effect=by_plate),
+        mtpl=AsyncMock(side_effect=BoleronError("boom")),
+    ):
+        report = await _build_report(_TWO_VEHICLES)
+    assert report is not None
+    first, second = (
+        [b.callback_data for row in (kb.inline_keyboard if kb else ()) for b in row]
+        for kb in report.keyboards
+    )
+    assert first == ["cmd:driver", f"cmd:mtpl:{PLATE}"]
+    assert second == [f"cmd:plate:{OTHER_PLATE}", f"cmd:mtpl:{OTHER_PLATE}"]
+
+
+@pytest.mark.asyncio
+async def test_send_report_sends_each_entry_with_its_own_keyboard():
+    context = MagicMock()
+    context.bot.send_message = AsyncMock()
+    first, second = MagicMock(), MagicMock()
+
+    await _send_report(
+        context, 1, _Report(entries=("a", "b", "c"), keyboards=(first, None, second))
+    )
+
+    calls = context.bot.send_message.call_args_list
+    assert [c.kwargs["text"] for c in calls] == ["a", "b", "c"]
+    assert [c.kwargs["reply_markup"] for c in calls] == [first, None, second]

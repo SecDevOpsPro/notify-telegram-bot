@@ -45,6 +45,7 @@ from notify_bot.handlers.common import help_command, request_access, start, unkn
 from notify_bot.handlers.enroll import (
     build_enroll_handler,
     build_stale_enroll_button_handler,
+    myinfo_command,
     unenroll_command,
 )
 from notify_bot.handlers.eur import eur_command
@@ -58,6 +59,12 @@ from notify_bot.handlers.obligations import (
     sticker_command,
     vehicle_command,
     vignette_command,
+)
+from notify_bot.handlers.vehicles import (
+    build_add_vehicle_handler,
+    build_stale_add_vehicle_button_handler,
+    build_vehicle_button_handler,
+    vehicles_command,
 )
 from notify_bot.scheduler.jobs import daily_obligations_report
 
@@ -154,6 +161,7 @@ async def _post_init(application: Application) -> None:
             BotCommand("request", "Ask the admin for access"),
             BotCommand("change", "EUR exchange rates (Cuba)"),
             BotCommand("enroll", "Save your personal data"),
+            BotCommand("myinfo", "Show your saved data and vehicles"),
             BotCommand("unenroll", "Delete your saved profile data"),
             BotCommand("driver", "Check driving licence obligations (MVR)"),
             BotCommand("plate", "Check vehicle obligations (MVR)"),
@@ -164,6 +172,8 @@ async def _post_init(application: Application) -> None:
             BotCommand("mtpl", "Check civil liability (MTPL) insurance"),
             BotCommand("fines", "Check traffic fines (KAT)"),
             BotCommand("vehicle", "Show vehicle registration data"),
+            BotCommand("vehicles", "List and manage your vehicles"),
+            BotCommand("addvehicle", "Add another vehicle"),
             BotCommand("myip", "Show bot's public IP (admin only)"),
             BotCommand("debug", "Grant a user verbose error detail (admin only)"),
             BotCommand("undebug", "Revoke a user's verbose error detail (admin only)"),
@@ -206,6 +216,8 @@ def run_bot() -> None:
     application.add_handler(build_enroll_handler())
     # Wizard buttons tapped after the wizard ended — must follow the handler above.
     application.add_handler(build_stale_enroll_button_handler())
+    application.add_handler(build_add_vehicle_handler())
+    application.add_handler(build_stale_add_vehicle_button_handler())
 
     # ── Public commands ───────────────────────────────────────────────────────
     application.add_handler(CommandHandler("start", start))
@@ -224,6 +236,7 @@ def run_bot() -> None:
 
     # ── Feature commands ──────────────────────────────────────────────────────
     application.add_handler(CommandHandler("change", eur_command))
+    application.add_handler(CommandHandler("myinfo", myinfo_command))
     application.add_handler(CommandHandler("unenroll", unenroll_command))
     application.add_handler(CommandHandler("driver", driver_command))
     application.add_handler(CommandHandler("plate", plate_command))
@@ -234,13 +247,15 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("mtpl", mtpl_command))
     application.add_handler(CommandHandler("fines", fines_command))
     application.add_handler(CommandHandler("vehicle", vehicle_command))
+    application.add_handler(CommandHandler("vehicles", vehicles_command))
 
     # ── Inline button callbacks ───────────────────────────────────────────────
     # Pattern must be registered before a generic catch-all if one were added
     application.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^(approve|deny):"))
+    application.add_handler(build_vehicle_button_handler())
 
-    # Menu buttons — registered after build_enroll_handler() above, so its own
-    # "cmd:enroll" entry point claims that callback before this generic one.
+    # Menu buttons — registered after the ConversationHandlers above, so their own
+    # "cmd:enroll" / "cmd:addvehicle" entry points claim those callbacks first.
     menu.register(application)
 
     # ── Unknown command catch-all ─────────────────────────────────────────────

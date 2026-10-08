@@ -2,13 +2,14 @@
 Obligation check handlers.
 
 /driver   — check by driving licence (uses stored national_id + driving_licence)
-/plate    — check by vehicle plate   (uses stored national_id + vehicle_plate)
-/vignette — check e-vignette for vehicle plate (uses stored vehicle_plate or arg)
-/sticker  — check Sofia parking sticker        (uses stored vehicle_plate or arg)
-/clamp    — check Sofia wheel-clamp status     (uses stored vehicle_plate or arg)
+/plate    — check by vehicle plate   (uses stored national_id + a plate)
+/vignette — check e-vignette for vehicle plate
+/sticker  — check Sofia parking sticker
+/clamp    — check Sofia wheel-clamp status
 
-All commands require admin approval.  Plate-based commands require the
-vehicle_plate field to be filled via /enroll (or accept a plate argument).
+All commands require admin approval.  Plate-based commands take an optional
+plate argument; without one they use the user's main (preferred) vehicle —
+see ``_pick_vehicle``.
 """
 
 from __future__ import annotations
@@ -16,13 +17,14 @@ from __future__ import annotations
 import html
 import logging
 
-from telegram import Message, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes
 
 from notify_bot import config, db
 from notify_bot.dates import expiry_warning
 from notify_bot.errors import format_error
 from notify_bot.formatting import align_fields
+from notify_bot.handlers.enroll import PLATE_RE
 from notify_bot.middlewares import require_approved
 from notify_bot.payment_buttons import build_copy_keyboard
 from notify_bot.services.bgtoll import (
@@ -91,6 +93,48 @@ def _debug_note(uid: int, note: str) -> str:
     return f"\n\n🛠 <code>{html.escape(note)}</code>"
 
 
+async def _rejected_plate_arg(message: Message, args: list[str] | None) -> bool:
+    """Reply and return True when a plate argument isn't a valid plate.
+
+    Plates end up in HTML replies, so anything else must not get that far.
+    """
+    if not args or PLATE_RE.match(db.normalize_plate(args[0])):
+        return False
+    await message.reply_text("❌ Invalid plate format (e.g. CB1234AB).")
+    return True
+
+
+async def _pick_vehicle(
+    uid: int, args: list[str] | None, command: str
+) -> tuple[str | None, db.VehicleRow | None, InlineKeyboardMarkup | None]:
+    """Resolve which vehicle a plate command checks.
+
+    A plate argument wins; it's paired with the user's saved vehicle of that
+    plate, if any (for its talon).  Otherwise the preferred vehicle is used,
+    and the returned keyboard has a button per other vehicle that re-runs
+    *command* for it (a ``cmd:<command>:<plate>`` menu callback).  Returns
+    ``(plate, vehicle, others)``; plate is None when there's no argument and
+    no saved vehicle.
+    """
+    vehicles = await db.list_vehicles(uid)
+    if args:
+        plate = db.normalize_plate(args[0])
+        return plate, next((v for v in vehicles if v["plate"] == plate), None), None
+    if not vehicles:
+        return None, None, None
+    preferred, others = vehicles[0], vehicles[1:]
+    buttons = [
+        InlineKeyboardButton(f"🚘 Lookup {v['plate']}", callback_data=f"cmd:{command}:{v['plate']}")
+        for v in others
+    ]
+    keyboard = (
+        InlineKeyboardMarkup([buttons[i : i + 2] for i in range(0, len(buttons), 2)])
+        if buttons
+        else None
+    )
+    return preferred["plate"], preferred, keyboard
+
+
 async def _reply_with_obligations(message: Message, units: list[Obligation]) -> None:
     """Send an obligations check: one message per payable fine, each with its copy buttons."""
     for part in render_fine_messages(units):
@@ -135,20 +179,15 @@ async def driver_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check road e-vignette status via bgtoll.bg.
 
-    Usage: /vignette          — uses the plate stored via /enroll
+    Usage: /vignette          — uses your main vehicle
            /vignette CB1234AB — check an ad-hoc plate
     """
     message = require(update.message, "message")
     uid = require(update.effective_user, "effective_user").id
 
-    # Plate from command arg takes precedence over enrolled plate
-    plate: str | None = None
-    if context.args:
-        plate = context.args[0].strip().upper()
-
-    if not plate:
-        profile = await db.get_profile(uid)
-        plate = profile.get("vehicle_plate") if profile else None
+    if await _rejected_plate_arg(message, context.args):
+        return
+    plate, _, others = await _pick_vehicle(uid, context.args, "vignette")
 
     if not plate:
         await message.reply_html(
@@ -157,7 +196,7 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    await message.reply_text(f"🔍 Checking vignette for {plate}…")
+    await message.reply_text(f"🔍 Checking vignette for {plate}…", reply_markup=others)
 
     try:
         info = await check_vignette(plate)
@@ -224,19 +263,15 @@ async def vignette_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check Sofia parking e-vignette sticker via sofiatraffic.bg.
 
-    Usage: /sticker          — uses the plate stored via /enroll
+    Usage: /sticker          — uses your main vehicle
            /sticker CB1234AB — check an ad-hoc plate
     """
     message = require(update.message, "message")
     uid = require(update.effective_user, "effective_user").id
 
-    plate: str | None = None
-    if context.args:
-        plate = context.args[0].strip().upper()
-
-    if not plate:
-        profile = await db.get_profile(uid)
-        plate = profile.get("vehicle_plate") if profile else None
+    if await _rejected_plate_arg(message, context.args):
+        return
+    plate, _, others = await _pick_vehicle(uid, context.args, "sticker")
 
     if not plate:
         await message.reply_html(
@@ -245,7 +280,7 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
 
-    await message.reply_text(f"🔍 Checking parking sticker for {plate}…")
+    await message.reply_text(f"🔍 Checking parking sticker for {plate}…", reply_markup=others)
 
     try:
         info = await check_sticker(plate)
@@ -285,19 +320,15 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check whether a vehicle is wheel-clamped in Sofia via sofiatraffic.bg.
 
-    Usage: /clamp          — uses the plate stored via /enroll
+    Usage: /clamp          — uses your main vehicle
            /clamp CB1234AB — check an ad-hoc plate
     """
     message = require(update.message, "message")
     uid = require(update.effective_user, "effective_user").id
 
-    plate: str | None = None
-    if context.args:
-        plate = context.args[0].strip().upper()
-
-    if not plate:
-        profile = await db.get_profile(uid)
-        plate = profile.get("vehicle_plate") if profile else None
+    if await _rejected_plate_arg(message, context.args):
+        return
+    plate, _, others = await _pick_vehicle(uid, context.args, "clamp")
 
     if not plate:
         await message.reply_html(
@@ -306,7 +337,7 @@ async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
-    await message.reply_text(f"🔍 Checking wheel-clamp status for {plate}…")
+    await message.reply_text(f"🔍 Checking wheel-clamp status for {plate}…", reply_markup=others)
 
     try:
         info = await check_clamp(plate)
@@ -338,12 +369,18 @@ async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 @require_approved
 async def plate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Check traffic/document obligations by vehicle plate number."""
+    """Check traffic/document obligations by vehicle plate number.
+
+    Usage: /plate          — uses your main vehicle
+           /plate CB1234AB — check another plate
+    """
     message = require(update.message, "message")
     uid = require(update.effective_user, "effective_user").id
     profile = await db.get_profile(uid)
     national_id = profile.get("national_id") if profile else None
-    plate = profile.get("vehicle_plate") if profile else None
+    if await _rejected_plate_arg(message, context.args):
+        return
+    plate, _, others = await _pick_vehicle(uid, context.args, "plate")
 
     if not national_id or not plate:
         await message.reply_html(
@@ -352,13 +389,17 @@ async def plate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
-    await message.reply_text("🔍 Checking obligations by vehicle plate…")
+    await message.reply_text(
+        f"🔍 Checking obligations by vehicle plate {plate}…", reply_markup=others
+    )
 
     try:
         units = await check_by_plate(national_id=national_id, plate_number=plate)
     except MVRApiError as exc:
         logger.exception("MVR API error for user %s", uid)
-        await _reply_check_failed(message, uid, "🚗 <b>Obligations by vehicle plate</b>", exc)
+        await _reply_check_failed(
+            message, uid, f"🚗 <b>Obligations by vehicle plate {plate}</b>", exc
+        )
         return
 
     await _reply_with_obligations(message, units)
@@ -373,34 +414,30 @@ async def gtp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     The API needs the talon (small registration card) number alongside the plate.
 
-    Usage: /gtp                    — uses the plate and talon stored via /enroll
+    Usage: /gtp                    — uses your main vehicle's plate and talon
            /gtp CB1234AB 009999999 — check an ad-hoc plate + talon
-           /gtp CB1234AB           — only if it's your enrolled plate (uses its stored talon)
+           /gtp CB1234AB           — only for one of your saved vehicles (uses its talon)
     """
     message = require(update.message, "message")
     uid = require(update.effective_user, "effective_user").id
 
     args = context.args or []
-    plate: str | None = args[0].strip().upper() if args else None
+    if await _rejected_plate_arg(message, context.args):
+        return
+    plate, vehicle, others = await _pick_vehicle(uid, args[:1], "gtp")
     talon: str | None = args[1].strip() if len(args) > 1 else None
-
-    if not plate or not talon:
-        profile = await db.get_profile(uid)
-        enrolled_plate = profile.get("vehicle_plate") if profile else None
-        if not plate:
-            plate = enrolled_plate
-        if plate and plate == enrolled_plate and profile:
-            talon = profile.get("talon_no")
+    if not talon and vehicle:
+        talon = vehicle["talon_no"]
 
     if not plate or not talon:
         await message.reply_html(
             "⚠️ <b>Plate and talon number needed.</b>\n\n"
             "The technical inspection check requires both. Use "
-            "<code>/gtp CB1234AB 009999999</code> or save them with /enroll."
+            "<code>/gtp CB1234AB 009999999</code> or save them with /vehicles."
         )
         return
 
-    await message.reply_text(f"🔍 Checking technical inspection for {plate}…")
+    await message.reply_text(f"🔍 Checking technical inspection for {plate}…", reply_markup=others)
 
     try:
         info = await check_gtp(car_no=plate, talon_no=talon)
@@ -431,19 +468,15 @@ async def gtp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def mtpl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check MTPL civil liability insurance via boleron.bg.
 
-    Usage: /mtpl          — uses the plate stored via /enroll
+    Usage: /mtpl          — uses your main vehicle
            /mtpl CB1234AB — check an ad-hoc plate
     """
     message = require(update.message, "message")
     uid = require(update.effective_user, "effective_user").id
 
-    plate: str | None = None
-    if context.args:
-        plate = context.args[0].strip().upper()
-
-    if not plate:
-        profile = await db.get_profile(uid)
-        plate = profile.get("vehicle_plate") if profile else None
+    if await _rejected_plate_arg(message, context.args):
+        return
+    plate, _, others = await _pick_vehicle(uid, context.args, "mtpl")
 
     if not plate:
         await message.reply_html(
@@ -452,7 +485,9 @@ async def mtpl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
-    await message.reply_text(f"🔍 Checking civil liability insurance for {plate}…")
+    await message.reply_text(
+        f"🔍 Checking civil liability insurance for {plate}…", reply_markup=others
+    )
 
     try:
         info = await check_mtpl(plate)
@@ -527,21 +562,26 @@ async def fines_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 @require_approved
 async def vehicle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show vehicle registration data using stored plate + talon number."""
+    """Show vehicle registration data using a saved vehicle's plate + talon number.
+
+    Usage: /vehicle          — your main vehicle
+           /vehicle CB1234AB — another of your saved vehicles
+    """
     message = require(update.message, "message")
     uid = require(update.effective_user, "effective_user").id
-    profile = await db.get_profile(uid)
-    plate = profile.get("vehicle_plate") if profile else None
-    talon = profile.get("talon_no") if profile else None
+    if await _rejected_plate_arg(message, context.args):
+        return
+    plate, vehicle, others = await _pick_vehicle(uid, context.args, "vehicle")
+    talon = vehicle["talon_no"] if vehicle else None
 
     if not plate or not talon:
         await message.reply_html(
             "⚠️ <b>Missing data.</b>\n\n"
-            "Use /enroll to save your vehicle plate and talon number first."
+            "Use /vehicles to save the vehicle with its plate and talon number first."
         )
         return
 
-    await message.reply_text("🔍 Looking up vehicle data…")
+    await message.reply_text(f"🔍 Looking up vehicle data for {plate}…", reply_markup=others)
 
     try:
         v: VehicleData = await check_vehicle_data(car_no=plate, talon_no=talon)

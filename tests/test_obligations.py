@@ -32,8 +32,30 @@ _PROFILE = {
     "national_id": "1234567890",
     "driving_licence": "123456789",
     "vehicle_plate": "XH2856",
-    "talon_no": "009999999",
 }
+
+
+def _vehicle(plate: str, talon: str | None, vehicle_id: int = 1) -> dict:
+    return {
+        "id": vehicle_id,
+        "user_id": 42,
+        "plate": plate,
+        "talon_no": talon,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+
+
+_VEHICLES = [_vehicle("XH2856", "009999999")]
+
+
+@pytest.fixture(autouse=True)
+def _saved_vehicles():
+    """Every test's user has one saved (main) vehicle unless it patches its own."""
+    with patch(
+        "notify_bot.handlers.obligations.db.list_vehicles", new=AsyncMock(return_value=_VEHICLES)
+    ) as mock:
+        yield mock
 
 
 def _fine(number: str) -> dict:
@@ -79,7 +101,7 @@ async def _run(handler, units: list[Obligation]) -> MagicMock:
         ),
         patch("notify_bot.handlers.obligations.check_by_plate", new=AsyncMock(return_value=units)),
     ):
-        await handler(update, MagicMock())
+        await handler(update, MagicMock(args=[]))
     return update
 
 
@@ -280,7 +302,7 @@ async def test_gtp_no_warning_when_far_from_expiry():
 # ── /gtp plate + talon resolution ────────────────────────────────────────────
 
 
-async def _run_gtp(args: list[str], profile: dict | None) -> tuple[MagicMock, AsyncMock]:
+async def _run_gtp(args: list[str], vehicles: list[dict]) -> tuple[MagicMock, AsyncMock]:
     update = _update()
     check = AsyncMock(return_value=GtpInfo(found=False))
     with (
@@ -288,7 +310,7 @@ async def _run_gtp(args: list[str], profile: dict | None) -> tuple[MagicMock, As
             "notify_bot.middlewares.db.get_user", new=AsyncMock(return_value={"status": "approved"})
         ),
         patch(
-            "notify_bot.handlers.obligations.db.get_profile", new=AsyncMock(return_value=profile)
+            "notify_bot.handlers.obligations.db.list_vehicles", new=AsyncMock(return_value=vehicles)
         ),
         patch("notify_bot.handlers.obligations.check_gtp", new=check),
     ):
@@ -299,28 +321,29 @@ async def _run_gtp(args: list[str], profile: dict | None) -> tuple[MagicMock, As
 @pytest.mark.parametrize(
     ("args", "expected"),
     [
-        ([], ("XH2856", "009999999")),  # enrolled plate + talon
+        ([], ("XH2856", "009999999")),  # main vehicle's plate + talon
         (["xh2856"], ("XH2856", "009999999")),  # own plate → stored talon
+        (["cb2222bb"], ("CB2222BB", "008888888")),  # another saved vehicle → its talon
         (["CB1111AA", "001234567"], ("CB1111AA", "001234567")),  # ad-hoc pair
     ],
 )
 @pytest.mark.asyncio
 async def test_gtp_resolves_plate_and_talon(args, expected):
-    _, check = await _run_gtp(args, _PROFILE)
+    _, check = await _run_gtp(args, [*_VEHICLES, _vehicle("CB2222BB", "008888888", 2)])
     check.assert_awaited_once_with(car_no=expected[0], talon_no=expected[1])
 
 
 @pytest.mark.parametrize(
-    ("args", "profile"),
+    ("args", "vehicles"),
     [
-        (["CB1111AA"], _PROFILE),  # someone else's plate, no talon given
-        ([], {**_PROFILE, "talon_no": None}),  # enrolled without a talon
-        ([], None),  # not enrolled at all
+        (["CB1111AA"], _VEHICLES),  # someone else's plate, no talon given
+        ([], [_vehicle("XH2856", None)]),  # saved without a talon
+        ([], []),  # no saved vehicles at all
     ],
 )
 @pytest.mark.asyncio
-async def test_gtp_asks_for_talon_when_missing(args, profile):
-    update, check = await _run_gtp(args, profile)
+async def test_gtp_asks_for_talon_when_missing(args, vehicles):
+    update, check = await _run_gtp(args, vehicles)
     check.assert_not_awaited()
     assert "talon" in update.message.reply_html.call_args.args[0]
 
@@ -340,3 +363,59 @@ async def test_clamp_not_clamped_warns_source_is_unreliable():
     assert "not</b> wheel-clamped" in text
     assert "unreliable" in text
     assert "Check manually" not in text
+
+
+# ── Choosing the vehicle ─────────────────────────────────────────────────────
+
+
+async def _run_mtpl(args: list[str]) -> tuple[MagicMock, AsyncMock]:
+    update = _update()
+    check = AsyncMock(return_value=MtplInfo(active=False))
+    with (
+        patch(
+            "notify_bot.middlewares.db.get_user", new=AsyncMock(return_value={"status": "approved"})
+        ),
+        patch("notify_bot.handlers.obligations.check_mtpl", new=check),
+    ):
+        await mtpl_command(update, MagicMock(args=args))
+    return update, check
+
+
+@pytest.mark.asyncio
+async def test_plate_command_without_args_uses_main_vehicle_and_offers_the_others(_saved_vehicles):
+    _saved_vehicles.return_value = [*_VEHICLES, _vehicle("CB2222BB", None, 2)]
+    update, check = await _run_mtpl([])
+    check.assert_awaited_once_with("XH2856")
+    progress = update.message.reply_text.call_args
+    assert "XH2856" in progress.args[0]
+    keyboard = progress.kwargs["reply_markup"]
+    assert [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row] == [
+        ("🚘 Lookup CB2222BB", "cmd:mtpl:CB2222BB")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_plate_command_with_one_vehicle_offers_no_others():
+    update, _ = await _run_mtpl([])
+    assert update.message.reply_text.call_args.kwargs["reply_markup"] is None
+
+
+@pytest.mark.asyncio
+async def test_plate_argument_wins_over_main_vehicle():
+    _, check = await _run_mtpl([" cb2222bb "])
+    check.assert_awaited_once_with("CB2222BB")
+
+
+@pytest.mark.asyncio
+async def test_invalid_plate_argument_is_rejected_before_checking():
+    update, check = await _run_mtpl(["A<B"])
+    check.assert_not_awaited()
+    assert "Invalid plate" in update.message.reply_text.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_plate_command_without_vehicles_asks_for_a_plate(_saved_vehicles):
+    _saved_vehicles.return_value = []
+    update, check = await _run_mtpl([])
+    check.assert_not_awaited()
+    assert "No plate found" in update.message.reply_html.call_args.args[0]

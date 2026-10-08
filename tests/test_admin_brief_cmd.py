@@ -9,12 +9,21 @@ import pytest
 from notify_bot.handlers.admin import brief_cmd
 
 _APPROVED_USER = {"user_id": 555, "first_name": "Ivo", "status": "approved"}
-_PROFILE = {
+_TARGET = {
     "user_id": 555,
+    "first_name": "Ivo",
     "national_id": "1234567890",
     "driving_licence": "123456789",
-    "vehicle_plate": "CA1234AB",
-    "talon_no": "009999999",
+    "vehicles": [
+        {
+            "id": 1,
+            "user_id": 555,
+            "plate": "CA1234AB",
+            "talon_no": "009999999",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+    ],
 }
 
 
@@ -73,7 +82,7 @@ async def test_defaults_to_caller_when_no_args():
     with (
         patch("notify_bot.handlers.admin.config.is_admin", return_value=True),
         patch("notify_bot.handlers.admin.db.get_user", AsyncMock(return_value=_APPROVED_USER)),
-        patch("notify_bot.handlers.admin.db.get_profile", AsyncMock(return_value=_PROFILE)),
+        patch("notify_bot.handlers.admin.db.get_report_target", AsyncMock(return_value=_TARGET)),
         patch(
             "notify_bot.handlers.admin.send_user_report_now", AsyncMock(return_value=True)
         ) as mock_send,
@@ -94,7 +103,7 @@ async def test_rejects_unapproved_user():
     with (
         patch("notify_bot.handlers.admin.config.is_admin", return_value=True),
         patch("notify_bot.handlers.admin.db.get_user", AsyncMock(return_value=pending_user)),
-        patch("notify_bot.handlers.admin.db.get_profile", AsyncMock(return_value=_PROFILE)),
+        patch("notify_bot.handlers.admin.db.get_report_target", AsyncMock(return_value=_TARGET)),
         patch("notify_bot.handlers.admin.send_user_report_now") as mock_send,
     ):
         await brief_cmd(update, context)
@@ -111,7 +120,7 @@ async def test_rejects_unknown_user():
     with (
         patch("notify_bot.handlers.admin.config.is_admin", return_value=True),
         patch("notify_bot.handlers.admin.db.get_user", AsyncMock(return_value=None)),
-        patch("notify_bot.handlers.admin.db.get_profile", AsyncMock(return_value=None)),
+        patch("notify_bot.handlers.admin.db.get_report_target", AsyncMock(return_value=None)),
         patch("notify_bot.handlers.admin.send_user_report_now") as mock_send,
     ):
         await brief_cmd(update, context)
@@ -124,17 +133,10 @@ async def test_rejects_unknown_user():
 async def test_rejects_user_with_no_profile_fields():
     update = _make_update(1)
     context = _make_context(["555"])
-    empty_profile = {
-        "user_id": 555,
-        "national_id": None,
-        "driving_licence": None,
-        "vehicle_plate": None,
-    }
-
     with (
         patch("notify_bot.handlers.admin.config.is_admin", return_value=True),
         patch("notify_bot.handlers.admin.db.get_user", AsyncMock(return_value=_APPROVED_USER)),
-        patch("notify_bot.handlers.admin.db.get_profile", AsyncMock(return_value=empty_profile)),
+        patch("notify_bot.handlers.admin.db.get_report_target", AsyncMock(return_value=None)),
         patch("notify_bot.handlers.admin.send_user_report_now") as mock_send,
     ):
         await brief_cmd(update, context)
@@ -154,7 +156,7 @@ async def test_db_error_is_reported_not_raised():
             "notify_bot.handlers.admin.db.get_user",
             AsyncMock(side_effect=RuntimeError("db locked")),
         ),
-        patch("notify_bot.handlers.admin.db.get_profile", AsyncMock(return_value=_PROFILE)),
+        patch("notify_bot.handlers.admin.db.get_report_target", AsyncMock(return_value=_TARGET)),
         patch("notify_bot.handlers.admin.send_user_report_now") as mock_send,
     ):
         await brief_cmd(update, context)
@@ -171,7 +173,7 @@ async def test_report_error_is_reported_not_raised():
     with (
         patch("notify_bot.handlers.admin.config.is_admin", return_value=True),
         patch("notify_bot.handlers.admin.db.get_user", AsyncMock(return_value=_APPROVED_USER)),
-        patch("notify_bot.handlers.admin.db.get_profile", AsyncMock(return_value=_PROFILE)),
+        patch("notify_bot.handlers.admin.db.get_report_target", AsyncMock(return_value=_TARGET)),
         patch(
             "notify_bot.handlers.admin.send_user_report_now",
             AsyncMock(side_effect=RuntimeError("boom")),
@@ -191,7 +193,7 @@ async def test_sends_report_and_confirms():
     with (
         patch("notify_bot.handlers.admin.config.is_admin", return_value=True),
         patch("notify_bot.handlers.admin.db.get_user", AsyncMock(return_value=_APPROVED_USER)),
-        patch("notify_bot.handlers.admin.db.get_profile", AsyncMock(return_value=_PROFILE)),
+        patch("notify_bot.handlers.admin.db.get_report_target", AsyncMock(return_value=_TARGET)),
         patch(
             "notify_bot.handlers.admin.send_user_report_now", AsyncMock(return_value=True)
         ) as mock_send,
@@ -201,14 +203,7 @@ async def test_sends_report_and_confirms():
     mock_send.assert_called_once()
     sent_context, sent_user = mock_send.call_args[0]
     assert sent_context is context
-    assert sent_user == {
-        "user_id": 555,
-        "first_name": "Ivo",
-        "national_id": "1234567890",
-        "driving_licence": "123456789",
-        "vehicle_plate": "CA1234AB",
-        "talon_no": "009999999",
-    }
+    assert sent_user == _TARGET
     assert "✅" in _last_reply(update)
     assert "555" in _last_reply(update)
 
@@ -221,7 +216,7 @@ async def test_reports_nothing_to_report_when_report_is_empty():
     with (
         patch("notify_bot.handlers.admin.config.is_admin", return_value=True),
         patch("notify_bot.handlers.admin.db.get_user", AsyncMock(return_value=_APPROVED_USER)),
-        patch("notify_bot.handlers.admin.db.get_profile", AsyncMock(return_value=_PROFILE)),
+        patch("notify_bot.handlers.admin.db.get_report_target", AsyncMock(return_value=_TARGET)),
         patch("notify_bot.handlers.admin.send_user_report_now", AsyncMock(return_value=False)),
     ):
         await brief_cmd(update, context)

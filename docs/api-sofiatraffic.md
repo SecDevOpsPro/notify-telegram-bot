@@ -39,24 +39,29 @@ GET https://www.sofiatraffic.bg/bg/parking/sticker/{plate}
 
 ```json
 {
-  "sticker": {
-    "plateNumber": "AA1234BB",
-    "validFrom": "2026-01-01",
-    "validTo": "2026-12-31",
-    "zone": "blue",
-    "type": "annual",
-    "status": "VALID"
-  }
+  "dateFrom": "2026-01-30T00:00:00+02:00",
+  "dateTo": "2027-01-30T00:00:00+02:00",
+  "issueOrderCoefficient": "1",
+  "issueOrderDescription": "Първи по време",
+  "issuerName": "<holder name>",
+  "regNum": "AA1234BB",
+  "requestDateFrom": "2026-01-30T00:00:00+02:00",
+  "requestDateTo": "2027-01-30T00:00:00+02:00",
+  "requestStatus": "Издаден",
+  "subZone": "Нова Подзона 14",
+  "subZoneString": "Синя зона",
+  "vignetteNum": "es00000",
+  "vignetteRequestNum": "BC000000",
+  "vignetteStatus": "ACTIVE",
+  "vignetteStatusCode": "PUBLISHED",
+  "vignetteType": "Y"
 }
 ```
 
-**No sticker:**
+All values are strings. The bot reads `dateFrom`, `dateTo`, `subZoneString`,
+`vignetteStatus` and `vignetteType`.
 
-```json
-{
-  "sticker": null
-}
-```
+**No sticker:** `200` with an empty body.
 
 ### HTTP status codes
 
@@ -134,7 +139,7 @@ sequenceDiagram
     S-->>B: 200 + Set-Cookie: XSRF-TOKEN=...; sofia_traffic_session=...
     B->>B: URL-decode XSRF-TOKEN cookie value
     B->>S: GET /bg/parking/sticker/{plate}<br/>X-XSRF-TOKEN: {decoded}
-    S-->>B: 200 {"sticker": {...}}
+    S-->>B: 200 {"dateFrom": ..., "vignetteStatus": ...}
 ```
 
 ---

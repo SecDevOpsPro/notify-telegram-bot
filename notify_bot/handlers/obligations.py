@@ -72,15 +72,6 @@ async def _reply_check_failed(
     )
 
 
-# sofiatraffic.bg sometimes gives a negative answer when the opposite is true,
-# so "no sticker" / "not clamped" replies carry a warning instead of reading as final.
-_SOFIA_UNRELIABLE_WARNING = (
-    "⚠️ <i>sofiatraffic.bg is unreliable and may show no sticker even when an active one exists.</i>"
-)
-_SOFIA_CLAMP_UNRELIABLE_WARNING = (
-    "⚠️ <i>sofiatraffic.bg is unreliable and may show a vehicle as not clamped even when it is.</i>"
-)
-
 _SOFIA_MANUAL_LINK = (
     '\nCheck manually: <a href="https://www.sofiatraffic.bg/en/parking">sofiatraffic.bg/parking</a>'
 )
@@ -293,18 +284,18 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if not info.found:
         await message.reply_html(
-            f"🅿️ <b>Parking sticker for {plate}</b>\n\n"
-            f"✅ No active parking sticker found.\n\n{_SOFIA_UNRELIABLE_WARNING}"
+            f"🅿️ <b>Parking sticker for {plate}</b>\n\n✅ No active parking sticker found."
         )
         return
 
     status_icon = "✅" if info.is_valid else "❌"
     lines = [
         f"🅿️ <b>Parking sticker for {plate}</b>",
-        f"{status_icon} Status: {info.status or 'Active'}",
+        f"{status_icon} Status: {info.status or 'Unknown'}",
     ]
-    if info.valid_from:
-        lines.append(f"📅 Valid: {info.valid_from} → {info.valid_to}")
+    lines.extend(format_validity_period(info.valid_from, info.valid_to))
+    if warning := expiry_warning(info.valid_to):
+        lines.append(warning)
     if info.zone:
         lines.append(f"📍 Zone: {info.zone}")
     if info.sticker_type:
@@ -350,8 +341,7 @@ async def clamp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if not info.found or not info.clamped:
         await message.reply_html(
-            f"🔓 <b>Wheel clamp for {plate}</b>\n\n✅ Vehicle is <b>not</b> wheel-clamped.\n\n"
-            f"{_SOFIA_CLAMP_UNRELIABLE_WARNING}"
+            f"🔓 <b>Wheel clamp for {plate}</b>\n\n✅ Vehicle is <b>not</b> wheel-clamped."
         )
         return
 

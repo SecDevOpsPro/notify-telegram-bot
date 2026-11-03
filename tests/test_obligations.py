@@ -351,17 +351,17 @@ async def test_gtp_asks_for_talon_when_missing(args, vehicles):
 # ── /sticker not-found result ────────────────────────────────────────────────
 
 
-async def test_sticker_not_found_warns_source_is_unreliable():
+async def test_sticker_not_found_has_no_warning():
     text = await _run_ok(sticker_command, "check_sticker", StickerInfo(plate="XH2856"))
     assert "No active parking sticker found." in text
-    assert "unreliable" in text
-    assert "Check manually" not in text  # the site itself gives the same wrong answer
+    assert "unreliable" not in text
+    assert "Check manually" not in text
 
 
-async def test_clamp_not_clamped_warns_source_is_unreliable():
+async def test_clamp_not_clamped_has_no_warning():
     text = await _run_ok(clamp_command, "check_clamp", ClampInfo(plate="XH2856"))
     assert "not</b> wheel-clamped" in text
-    assert "unreliable" in text
+    assert "unreliable" not in text
     assert "Check manually" not in text
 
 

@@ -25,47 +25,72 @@ from notify_bot.services.sofiatraffic import (
 
 
 class TestParseSticker:
-    def test_explicit_null_returns_not_found(self):
-        result = _parse_sticker("CB1234AB", {"sticker": None})
-        assert result.found is False
-        assert result.plate == "CB1234AB"
-
-    def test_nested_sticker_object(self):
-        data = {
-            "sticker": {
-                "validFrom": "2026-01-01",
-                "validTo": "2026-12-31",
-                "zone": "blue",
-                "status": "VALID",
-            }
-        }
-        result = _parse_sticker("CB1234AB", data)
-        assert result.found is True
-        assert result.valid_from == "2026-01-01"
-        assert result.valid_to == "2026-12-31"
-        assert result.zone == "blue"
-        assert result.status == "VALID"
-
-    def test_flat_response_with_zone_field(self):
-        data = {"zone": "green", "valid_from": "2026-03-01", "valid_to": "2026-05-01"}
-        result = _parse_sticker("CB9999ZZ", data)
-        assert result.found is True
-        assert result.zone == "green"
-        assert result.valid_from == "2026-03-01"
-
     def test_empty_dict_returns_not_found(self):
         result = _parse_sticker("CB1234AB", {})
         assert result.found is False
+        assert result.plate == "CB1234AB"
 
-    def test_sticker_data_key_variant(self):
-        data = {"stickerData": {"status": "ACTIVE", "zone": "red"}}
-        result = _parse_sticker("CB5678CD", data)
+    def test_official_response(self):
+        data = {
+            "dateFrom": "2026-01-30T00:00:00+02:00",
+            "dateTo": "2027-01-30T00:00:00+02:00",
+            "regNum": "CB1234AB",
+            "requestStatus": "Издаден",
+            "subZone": "Нова Подзона 1",
+            "subZoneString": "Синя зона",
+            "vignetteNum": "es00000",
+            "vignetteStatus": "ACTIVE",
+            "vignetteStatusCode": "PUBLISHED",
+            "vignetteType": "Y",
+        }
+        result = _parse_sticker("CB1234AB", data)
         assert result.found is True
+        assert result.is_valid is True
+        assert result.valid_from == "2026-01-30T00:00:00+02:00"
+        assert result.valid_to == "2027-01-30T00:00:00+02:00"
+        assert result.zone == "Blue zone"
+        assert result.sticker_type == "Annual"
         assert result.status == "ACTIVE"
-        assert result.zone == "red"
+
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ("Синя зона", "Blue zone"),
+            ("Зелена зона", "Green zone"),
+        ],
+    )
+    def test_zone_labels(self, raw, expected):
+        result = _parse_sticker("CB1234AB", {"regNum": "CB1234AB", "subZoneString": raw})
+        assert result.zone == expected
+
+    def test_unknown_zone_asks_user_to_report_it(self):
+        data = {"regNum": "CB1234AB", "subZoneString": "<unexpected>"}
+        result = _parse_sticker("CB1234AB", data)
+        assert result.zone == (
+            "Unknown zone. Please report this value &lt;unexpected&gt; to the admins"
+        )
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {"regNum": "CB1234AB"},
+            {"regNum": "CB1234AB", "subZoneString": ""},
+            {"regNum": "CB1234AB", "subZoneString": "  "},
+        ],
+    )
+    def test_empty_zone_asks_user_to_report_it(self, data):
+        assert _parse_sticker("CB1234AB", data).zone == (
+            "Unknown zone. Please report this value No zone reported to the admins"
+        )
+
+    def test_other_zone_properties_are_ignored(self):
+        data = {"regNum": "CB1234AB", "zone": "Синя зона", "subZone": "Нова Подзона 1"}
+        assert _parse_sticker("CB1234AB", data).zone == (
+            "Unknown zone. Please report this value No zone reported to the admins"
+        )
 
     def test_raw_stored(self):
-        raw = {"sticker": {"status": "VALID"}}
+        raw = {"regNum": "AB1234CD", "vignetteStatus": "ACTIVE"}
         result = _parse_sticker("AB1234CD", raw)
         assert result.raw is raw
 
@@ -77,14 +102,9 @@ class TestStickerIsValid:
     @pytest.mark.parametrize(
         "status, expected",
         [
-            ("VALID", True),
-            ("valid", True),
             ("ACTIVE", True),
-            ("OK", True),
-            ("ACTIVE_STICKER", True),
             ("EXPIRED", False),
-            ("INVALID", False),
-            (None, True),  # found but no status → treated as valid
+            (None, False),
         ],
     )
     def test_status_variants(self, status, expected):
@@ -92,7 +112,7 @@ class TestStickerIsValid:
         assert info.is_valid == expected
 
     def test_not_found_is_never_valid(self):
-        info = StickerInfo(plate="CB1234AB", found=False, status="VALID")
+        info = StickerInfo(plate="CB1234AB", found=False, status="ACTIVE")
         assert info.is_valid is False
 
 
@@ -189,7 +209,9 @@ def _mock_csrf_client(sticker_response: httpx.Response):
 
 class TestCheckSticker:
     async def test_found_sticker(self):
-        resp = _make_response(200, {"sticker": {"status": "VALID", "zone": "blue"}})
+        resp = _make_response(
+            200, {"regNum": "CB1234AB", "vignetteStatus": "ACTIVE", "subZoneString": "Синя зона"}
+        )
         with patch(
             "notify_bot.services.sofiatraffic._get_csrf_client",
             new_callable=AsyncMock,
@@ -198,7 +220,7 @@ class TestCheckSticker:
             result = await check_sticker("cb1234ab")
         assert result.plate == "CB1234AB"
         assert result.found is True
-        assert result.zone == "blue"
+        assert result.zone == "Blue zone"
 
     async def test_404_returns_not_found(self):
         resp = _make_response(404)

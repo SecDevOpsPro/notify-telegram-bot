@@ -334,10 +334,10 @@ async def test_report_includes_active_parking_sticker():
 
 
 @pytest.mark.asyncio
-async def test_report_shows_when_no_parking_sticker_found():
+async def test_report_hides_parking_sticker_section_when_not_found():
     with _patched():
         message = await _report_text(_FULL_USER)
-    assert f"🅿️ <b>Parking sticker ({PLATE}):</b>\n✅ No active parking sticker found." in message
+    assert "Parking sticker" not in message
 
 
 @pytest.mark.asyncio
@@ -458,6 +458,7 @@ async def test_report_sections_in_order():
     with _patched(
         licence=AsyncMock(return_value=units),
         plate=AsyncMock(return_value=units),
+        sticker=AsyncMock(return_value=StickerInfo(plate=PLATE, found=True, status="ACTIVE")),
         clamp=AsyncMock(return_value=clamp),
     ):
         message = await _report_text(_FULL_USER)

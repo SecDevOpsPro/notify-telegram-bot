@@ -183,8 +183,9 @@ async def _build_report(user: ReportTarget) -> _Report | None:
     Run all obligation checks for one user and compose their report.
 
     Every check that applies to the user gets a section, whether it came back
-    clean, with findings, or failed — except the MVR licence/plate and wheel
-    clamp checks, which only appear when they find something or fail.
+    clean, with findings, or failed — except the MVR licence/plate, parking
+    sticker and wheel clamp checks, which only appear when they find something
+    or fail.
     Sections follow the order the checks run in: fines and the MVR licence
     details first, then for each vehicle (preferred first) its MVR plate
     details, inspection, MTPL, vignette, parking sticker and wheel clamp.
@@ -366,8 +367,6 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 if sticker.sticker_type:
                     sticker_lines.append(f"📋 Type: {sticker.sticker_type}")
                 sections.append("\n".join(sticker_lines))
-            else:
-                sections.append(f"{sticker_title}\n✅ No active parking sticker found.")
         except (SofiaCloudflareError, SofiaTrafficError) as exc:
             logger.warning("Sticker check failed for user %s (%s): %s", uid, plate, exc)
             sections.append(_check_failed(uid, sticker_title, exc))

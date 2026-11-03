@@ -25,7 +25,7 @@ from notify_bot.services.boleron import (
     MtplInfo,
 )
 from notify_bot.services.mvr import MVRApiError, Obligation
-from notify_bot.services.sofiatraffic import ClampInfo, SofiaTrafficError
+from notify_bot.services.sofiatraffic import ClampInfo, SofiaTrafficError, StickerInfo
 
 PLATE = "XH2856"
 OTHER_PLATE = "CB1234AB"
@@ -108,6 +108,7 @@ async def test_retry_does_not_retry_skip_on_exceptions():
 # ── _build_report: defaults + patch helper ──────────────────────────
 
 _DEFAULT_VIGNETTE = VignetteInfo(plate=PLATE, country="BG", found=False)
+_DEFAULT_STICKER = StickerInfo(plate=PLATE, found=False)
 _DEFAULT_CLAMP = ClampInfo(plate=PLATE, found=False)
 _DEFAULT_GTP = GtpInfo(found=False)
 _DEFAULT_MTPL = MtplInfo(active=False)
@@ -121,7 +122,7 @@ def _patched(**overrides):
     "nothing found" default, then apply per-test overrides on top.
 
     ``overrides`` maps a short name (licence, plate, vignette, vignette_boleron,
-    clamp, gtp, mtpl, fines) to the mock that should replace the
+    sticker, clamp, gtp, mtpl, fines) to the mock that should replace the
     default for that check.
     """
     targets = {
@@ -134,6 +135,10 @@ def _patched(**overrides):
         "vignette_boleron": (
             "notify_bot.scheduler.jobs.check_vignette_boleron",
             AsyncMock(return_value=BoleronVignetteInfo(found=False)),
+        ),
+        "sticker": (
+            "notify_bot.scheduler.jobs.check_sticker",
+            AsyncMock(return_value=_DEFAULT_STICKER),
         ),
         "clamp": (
             "notify_bot.scheduler.jobs.check_clamp",
@@ -306,18 +311,48 @@ async def test_vignette_bgtoll_error_falls_back_to_boleron_not_found():
     assert f"🛣️ <b>Vignette ({PLATE}):</b>\n❌ No active vignette found." in message
 
 
-# ── Wheel clamp section (parking sticker is not part of the report) ──────────
+# ── Parking sticker section ──────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_report_never_includes_parking_sticker():
-    with (
-        _patched(),
-        patch("notify_bot.services.sofiatraffic.check_sticker", new=AsyncMock()) as sticker,
-    ):
+async def test_report_includes_active_parking_sticker():
+    sticker = StickerInfo(
+        plate=PLATE,
+        found=True,
+        status="ACTIVE",
+        valid_from="2026-01-30T00:00:00+02:00",
+        valid_to="2999-01-30T00:00:00+02:00",
+        zone="Синя зона",
+        sticker_type="Annual",
+    )
+    with _patched(sticker=AsyncMock(return_value=sticker)):
         message = await _report_text(_FULL_USER)
-    assert "Parking sticker" not in message
-    sticker.assert_not_called()
+    assert f"🅿️ <b>Parking sticker ({PLATE}):</b>\n✅ Status: ACTIVE" in message
+    assert "📅 Ends: 30.01.2999" in message
+    assert "📍 Zone: Синя зона" in message
+    assert "📋 Type: Annual" in message
+
+
+@pytest.mark.asyncio
+async def test_report_shows_when_no_parking_sticker_found():
+    with _patched():
+        message = await _report_text(_FULL_USER)
+    assert f"🅿️ <b>Parking sticker ({PLATE}):</b>\n✅ No active parking sticker found." in message
+
+
+@pytest.mark.asyncio
+async def test_sticker_error_shows_failed_section_and_retry():
+    with _patched(sticker=AsyncMock(side_effect=SofiaTrafficError("blocked"))):
+        report = await _build_report(_FULL_USER)
+    assert report is not None
+    assert (
+        f"🅿️ <b>Parking sticker ({PLATE}):</b>\n⚠️ Check failed — tap its 🔁 button below to retry."
+        in report.text
+    )
+    assert f"cmd:sticker:{PLATE}" in [b.callback_data for b in report.buttons]
+
+
+# ── Wheel clamp section ──────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -433,6 +468,7 @@ async def test_report_sections_in_order():
         "🔧 <b>Technical Inspection",
         "🛡️ <b>Civil Liability",
         "🛣️ <b>Vignette",
+        "🅿️ <b>Parking sticker",
         "🔒 <b>Wheel clamp",
     ]
     positions = [message.index(header) for header in headers]

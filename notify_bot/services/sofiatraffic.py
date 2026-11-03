@@ -19,6 +19,7 @@ detected so callers can present a user-friendly fallback.
 
 from __future__ import annotations
 
+import html
 import logging
 import urllib.parse
 from dataclasses import dataclass, field
@@ -137,11 +138,8 @@ class StickerInfo:
 
     @property
     def is_valid(self) -> bool:
-        """True when the sticker is present and reports an active/valid status."""
-        if not self.found:
-            return False
-        s = (self.status or "").upper()
-        return s in {"VALID", "ACTIVE", "OK", "ACTIVE_STICKER"} or (self.found and not self.status)
+        """True when the sticker is present and reports the ``ACTIVE`` status."""
+        return self.found and self.status == "ACTIVE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,43 +166,43 @@ class ClampInfo:
 # ── Parsers ───────────────────────────────────────────────────────────────────
 
 
+_VIGNETTE_TYPE_LABELS = {"Y": "Annual"}
+
+# Sofia's two paid parking zones, keyed by the lowercased API value.
+_ZONE_LABELS = {"синя зона": "Blue zone", "зелена зона": "Green zone"}
+
+
+def _zone_label(zone: str | None) -> str:
+    """English name of *zone*, or a request to report a missing or unrecognized value.
+
+    The result goes into HTML messages, so the API's value is escaped.
+    """
+    value = (zone or "").strip()
+    label = _ZONE_LABELS.get(value.lower())
+    reported = html.escape(value) or "No zone reported"
+    return label or f"Unknown zone. Please report this value {reported} to the admins"
+
+
 def _parse_sticker(plate: str, data: dict[str, Any]) -> StickerInfo:
     """
     Parse the /sticker API response into a :class:`StickerInfo`.
 
-    The parser is intentionally lenient — it tries several known field names
-    and falls back to ``None`` for missing keys.
+    The response is a flat object whose values are all strings (see
+    ``docs/api-sofiatraffic.md``); one without ``regNum`` isn't a sticker.
     """
-    # Explicit null at top level → not found
-    if "sticker" in data and data["sticker"] is None:
+    if not data.get("regNum"):
         return StickerInfo(plate=plate, found=False, raw=data)
 
-    payload: dict[str, Any] = (
-        data.get("sticker") or data.get("stickerData") or data.get("data") or data
-    )
-
-    if (
-        not payload
-        or payload is data
-        and not any(k in data for k in ("validFrom", "valid_from", "zone", "status", "plateNumber"))
-    ):
-        return StickerInfo(plate=plate, found=False, raw=data)
-
-    def _get(*keys: str) -> str | None:
-        for k in keys:
-            v = payload.get(k)
-            if v is not None:
-                return str(v)
-        return None
+    sticker_type = data.get("vignetteType")
 
     return StickerInfo(
         plate=plate,
         found=True,
-        valid_from=_get("validFrom", "valid_from", "from", "startDate", "dateFrom"),
-        valid_to=_get("validTo", "valid_to", "to", "endDate", "dateTo"),
-        zone=_get("zone", "parkingZone", "zoneCode", "area"),
-        sticker_type=_get("type", "stickerType", "category"),
-        status=_get("status", "stickerStatus", "state"),
+        valid_from=data.get("dateFrom"),
+        valid_to=data.get("dateTo"),
+        zone=_zone_label(data.get("subZoneString")),
+        sticker_type=_VIGNETTE_TYPE_LABELS.get(sticker_type or "", sticker_type),
+        status=data.get("vignetteStatus"),
         raw=data,
     )
 

@@ -54,6 +54,7 @@ from notify_bot.services.sofiatraffic import (
 from notify_bot.services.sofiatraffic import (
     SofiaTrafficError,
     check_clamp,
+    check_sticker,
 )
 from notify_bot.updates import MissingUpdateFieldError, require
 
@@ -183,13 +184,12 @@ async def _build_report(user: ReportTarget) -> _Report | None:
 
     Every check that applies to the user gets a section, whether it came back
     clean, with findings, or failed — except the MVR licence/plate and wheel
-    clamp checks, which only appear when they find something or fail.  The
-    parking sticker isn't checked at all: sofiatraffic.bg misses active
-    stickers too often for an unprompted report (/sticker still offers it).
+    clamp checks, which only appear when they find something or fail.
     Sections follow the order the checks run in: fines and the MVR licence
     details first, then for each vehicle (preferred first) its MVR plate
-    details, inspection, MTPL, vignette and wheel clamp.  Returns ``None``
-    only when the user has no profile data that any check applies to.
+    details, inspection, MTPL, vignette, parking sticker and wheel clamp.
+    Returns ``None`` only when the user has no profile data that any check
+    applies to.
     """
     uid: int = user["user_id"]
     name: str = user.get("first_name") or "there"
@@ -347,6 +347,31 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 retries.setdefault(plate, []).append(
                     _retry_button("Retry vignette", "vignette", plate)
                 )
+
+        sticker_title = f"🅿️ <b>Parking sticker ({plate}):</b>"
+        try:
+            await pause()
+            sticker = await _retry(check_sticker, plate, skip_on=(SofiaCloudflareError,))
+            if sticker.found:
+                status_icon = "✅" if sticker.is_valid else "❌"
+                sticker_lines = [
+                    sticker_title,
+                    f"{status_icon} Status: {sticker.status or 'Unknown'}",
+                ]
+                sticker_lines.extend(format_validity_period(sticker.valid_from, sticker.valid_to))
+                if warning := expiry_warning(sticker.valid_to):
+                    sticker_lines.append(warning)
+                if sticker.zone:
+                    sticker_lines.append(f"📍 Zone: {sticker.zone}")
+                if sticker.sticker_type:
+                    sticker_lines.append(f"📋 Type: {sticker.sticker_type}")
+                sections.append("\n".join(sticker_lines))
+            else:
+                sections.append(f"{sticker_title}\n✅ No active parking sticker found.")
+        except (SofiaCloudflareError, SofiaTrafficError) as exc:
+            logger.warning("Sticker check failed for user %s (%s): %s", uid, plate, exc)
+            sections.append(_check_failed(uid, sticker_title, exc))
+            retries.setdefault(plate, []).append(_retry_button("Retry sticker", "sticker", plate))
 
         clamp_title = f"🔒 <b>Wheel clamp ({plate}):</b>"
         try:

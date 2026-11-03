@@ -267,7 +267,8 @@ flowchart TD
     P --> G["GTP (needs talon)"]
     G --> M["MTPL"]
     M --> VI["vignette (bgtoll, boleron fallback)"]
-    VI --> C["wheel clamp"]
+    VI --> ST["parking sticker"]
+    ST --> C["wheel clamp"]
     C --> V
     V -- done --> R["message 1: personal checks + main vehicle;<br/>one more message per other vehicle"]
     R --> K["each message gets its own checks' buttons:<br/>fines shortcuts + a Retry button per failed check"]
@@ -278,10 +279,8 @@ Configured via `DAILY_REPORT_TIME` (default `08:00` UTC). Registered in `run_bot
 `job_queue.run_daily(daily_obligations_report, time=config.DAILY_REPORT_TIME)`.
 
 Every saved vehicle is checked.  A check that fails still gets a section, and the
-report gets a 🔁 Retry button that re-runs that command for that plate.  The
-**parking sticker** isn't in the report (sofiatraffic.bg misses active stickers
-too often); `/sticker` still checks it.  If a vehicle is clamped, the report
-says so.
+report gets a 🔁 Retry button that re-runs that command for that plate.  If a
+vehicle is clamped, the report says so.
 
 See [api-sofiatraffic.md](api-sofiatraffic.md) for full API reference.
 

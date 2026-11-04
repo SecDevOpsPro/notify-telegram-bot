@@ -50,6 +50,7 @@ def _dispatch_table() -> dict[str, HandlerCallback[None]]:
     # common.py imports this module to build the /help keyboard, and some of
     # these handler modules import from common.py.
     from notify_bot.handlers.admin import brief_cmd, myip_cmd, pending_cmd, users_cmd
+    from notify_bot.handlers.alerts import alerts_command
     from notify_bot.handlers.common import list_commands_command, request_access
     from notify_bot.handlers.enroll import myinfo_command, unenroll_command
     from notify_bot.handlers.eur import eur_command
@@ -82,6 +83,7 @@ def _dispatch_table() -> dict[str, HandlerCallback[None]]:
         "fines": fines_command,
         "vehicle": vehicle_command,
         "vehicles": vehicles_command,
+        "alerts": alerts_command,
         "pending": pending_cmd,
         "users": users_cmd,
         "myip": myip_cmd,
@@ -151,8 +153,7 @@ def build_help_keyboard(phase: MenuPhase) -> InlineKeyboardMarkup:
         rows.append(_row(("💶 Change (EUR)", "change")))
     else:
         rows.append(_header("🚗 Vehicle checks"))
-        # Same order as the daily report's sections (scheduler.jobs._build_report);
-        # the report has no parking sticker, so it comes last.
+        # Roughly the order of the daily report's sections (scheduler.jobs._build_report).
         rows.append(_row(("🚨 Fines", "fines"), ("🚗 Driver", "driver")))
         rows.append(_row(("🚙 Plate", "plate"), ("🧾 GTP", "gtp")))
         rows.append(_row(("🛡 MTPL", "mtpl"), ("🛣 Vignette", "vignette")))
@@ -162,6 +163,7 @@ def build_help_keyboard(phase: MenuPhase) -> InlineKeyboardMarkup:
         # "cmd:enroll" re-runs the /enroll wizard, which then only updates personal data.
         rows.append(_row(("📝 Update info", "enroll"), ("🗑 Unenroll", "unenroll")))
         rows.append(_row(("👤 My info", "myinfo"), ("💶 Change (EUR)", "change")))
+        rows.append(_row(("🔔 Alerts", "alerts")))
 
     if phase["is_admin"]:
         rows.append(_header("🛠 Admin"))

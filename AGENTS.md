@@ -57,6 +57,7 @@ notify_bot/
                    build_fines_keyboard() — the daily report's /driver and per-plate /plate shortcut buttons
   middlewares.py   @require_approved decorator
   updates.py       require() to narrow PTB's optional Update fields; HandlerCallback type
+  report_checks.py the daily report's check names and labels, and which ones apply to a user
   handlers/        one module per command group
   services/        one module per external API (mvr, bgtoll, sofiatraffic, cambiocuba, boleron)
   scheduler/       daily report job
@@ -78,6 +79,11 @@ wired up in `run_bot.py`.
   (`save_vehicle`, `set_preferred_vehicle`, `delete_vehicle`), which keep it
   pointing at an existing vehicle. Plate commands resolve their plate with
   `obligations._pick_vehicle` (argument, else main vehicle).
+- **Daily report opt-outs.** `/alerts` stores only what a user switched off, in
+  `report_opt_outs` by plate (`''` for personal checks), so checks default to on.
+  A new report check needs an entry in `report_checks.py` and an enabled test in
+  `scheduler.jobs._build_report`. A disabled check makes no API call and appears
+  only in its message's "Hidden" footer.
 - **Async everywhere.** HTTP calls use `httpx` (async), never `requests`,
   to avoid blocking the event loop.
 - **Error visibility split.** `errors.format_error()` gives full exception

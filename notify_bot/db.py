@@ -34,6 +34,7 @@ from typing import Any, AsyncIterator, Literal, TypedDict, cast
 import aiosqlite
 
 from notify_bot import legacy_upgrade
+from notify_bot.report_checks import PERSONAL_SCOPE, ReportCheck
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,7 @@ class ReportTarget(TypedDict):
     national_id: str | None
     driving_licence: str | None
     vehicles: list[VehicleRow]  # preferred first
+    disabled_checks: dict[str, set[ReportCheck]]  # by plate, or PERSONAL_SCOPE
 
 
 class VehicleLimitError(Exception):
@@ -131,6 +133,18 @@ CREATE TABLE IF NOT EXISTS user_vehicles (
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     UNIQUE (user_id, plate)
+)
+"""
+
+# Only what a user switched off, so every check defaults to on.  ``plate`` is the
+# vehicle, or PERSONAL_SCOPE ('') since SQLite primary keys allow duplicate NULLs.
+_CREATE_REPORT_OPT_OUTS = """
+CREATE TABLE IF NOT EXISTS report_opt_outs (
+    user_id     INTEGER NOT NULL REFERENCES users(user_id),
+    plate       TEXT NOT NULL,
+    check_name  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, plate, check_name)
 )
 """
 
@@ -247,6 +261,7 @@ async def init_db() -> None:
             await conn.execute(_CREATE_USERS)
             await conn.execute(_CREATE_PROFILES)
             await conn.execute(_CREATE_VEHICLES)
+            await conn.execute(_CREATE_REPORT_OPT_OUTS)
             await legacy_upgrade.upgrade(conn)  # one-off; remove with legacy_upgrade.py
             await conn.commit()
         except BaseException:
@@ -351,8 +366,9 @@ async def upsert_profile(
 
 
 async def delete_profile(user_id: int) -> None:
-    """Remove a user's saved profile (national_id, licence) and all their vehicles."""
+    """Remove a user's saved profile, all their vehicles and their report settings."""
     async with _transaction() as conn:
+        await conn.execute("DELETE FROM report_opt_outs WHERE user_id = ?", (user_id,))
         await conn.execute("DELETE FROM user_vehicles WHERE user_id = ?", (user_id,))
         await conn.execute("DELETE FROM user_profiles WHERE user_id = ?", (user_id,))
 
@@ -471,6 +487,9 @@ async def delete_vehicle(user_id: int, plate: str) -> bool:
             "DELETE FROM user_vehicles WHERE user_id = ? AND plate = ?", (user_id, plate)
         )
         await conn.execute(
+            "DELETE FROM report_opt_outs WHERE user_id = ? AND plate = ?", (user_id, plate)
+        )
+        await conn.execute(
             """
             UPDATE user_profiles SET
                 vehicle_plate = (
@@ -482,6 +501,38 @@ async def delete_vehicle(user_id: int, plate: str) -> bool:
             (user_id, _now(), user_id, plate),
         )
         return True
+
+
+# ── Report settings ───────────────────────────────────────────────────────────
+
+
+async def list_opt_outs(user_id: int) -> dict[str, set[ReportCheck]]:
+    """The checks a user switched off, by plate (or ``PERSONAL_SCOPE``)."""
+    async with _locked_conn() as conn:
+        async with conn.execute(
+            "SELECT plate, check_name FROM report_opt_outs WHERE user_id = ?", (user_id,)
+        ) as cur:
+            rows = await cur.fetchall()
+    disabled: dict[str, set[ReportCheck]] = {}
+    for row in rows:
+        disabled.setdefault(row["plate"], set()).add(cast(ReportCheck, row["check_name"]))
+    return disabled
+
+
+async def set_check_enabled(user_id: int, scope: str, check: ReportCheck, *, enabled: bool) -> None:
+    """Switch one check on or off for a plate (or ``PERSONAL_SCOPE``)."""
+    plate = PERSONAL_SCOPE if scope == PERSONAL_SCOPE else normalize_plate(scope)
+    if enabled:
+        await _write(
+            "DELETE FROM report_opt_outs WHERE user_id = ? AND plate = ? AND check_name = ?",
+            (user_id, plate, check),
+        )
+    else:
+        await _write(
+            "INSERT OR IGNORE INTO report_opt_outs (user_id, plate, check_name, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, plate, check, _now()),
+        )
 
 
 # ── Scheduler helpers ─────────────────────────────────────────────────────────
@@ -512,10 +563,24 @@ async def _report_targets(where: str = "", params: tuple[Any, ...] = ()) -> list
             params,
         ) as cur:
             vehicle_rows = await cur.fetchall()
+        async with conn.execute(
+            f"""
+            SELECT o.user_id, o.plate, o.check_name FROM report_opt_outs o
+            JOIN users u ON u.user_id = o.user_id
+            WHERE u.status = 'approved' {where}
+            """,
+            params,
+        ) as cur:
+            opt_out_rows = await cur.fetchall()
 
     vehicles: dict[int, list[VehicleRow]] = {}
     for r in vehicle_rows:
         vehicles.setdefault(r["user_id"], []).append(cast(VehicleRow, dict(r)))
+
+    disabled: dict[int, dict[str, set[ReportCheck]]] = {}
+    for r in opt_out_rows:
+        scopes = disabled.setdefault(r["user_id"], {})
+        scopes.setdefault(r["plate"], set()).add(cast(ReportCheck, r["check_name"]))
 
     targets: list[ReportTarget] = []
     for u in users:
@@ -525,6 +590,7 @@ async def _report_targets(where: str = "", params: tuple[Any, ...] = ()) -> list
             "national_id": u["national_id"],
             "driving_licence": u["driving_licence"],
             "vehicles": vehicles.get(u["user_id"], []),
+            "disabled_checks": disabled.get(u["user_id"], {}),
         }
         if target["national_id"] or target["driving_licence"] or target["vehicles"]:
             targets.append(target)

@@ -408,3 +408,58 @@ async def test_vehicle_talon_update_bumps_updated_at_only(tmp_db):
     vehicle = await db.get_vehicle(1, "CB1234AB")
     assert vehicle["created_at"] == created["created_at"]
     assert vehicle["updated_at"] > created["updated_at"]
+
+
+# ── Report opt-outs ───────────────────────────────────────────────────────────
+
+
+async def _approved_with_vehicle(uid: int = 1, plate: str = "CB1234AB") -> None:
+    await db.init_db()
+    await db.upsert_user(uid, "user", "User")
+    await db.set_user_status(uid, "approved")
+    await db.save_vehicle(uid, plate, "009999999")
+
+
+@pytest.mark.asyncio
+async def test_opt_outs_toggle_and_stay_separate_per_scope(tmp_db):
+    await _approved_with_vehicle()
+    await db.set_check_enabled(1, "cb1234ab", "sticker", enabled=False)
+    await db.set_check_enabled(1, "cb1234ab", "sticker", enabled=False)  # idempotent
+    await db.set_check_enabled(1, "", "fines", enabled=False)
+    assert await db.list_opt_outs(1) == {"CB1234AB": {"sticker"}, "": {"fines"}}
+
+    await db.set_check_enabled(1, "CB1234AB", "sticker", enabled=True)
+    assert await db.list_opt_outs(1) == {"": {"fines"}}
+
+
+@pytest.mark.asyncio
+async def test_report_target_carries_opt_outs(tmp_db):
+    await _approved_with_vehicle()
+    await db.set_check_enabled(1, "CB1234AB", "clamp", enabled=False)
+
+    target = await db.get_report_target(1)
+    assert target["disabled_checks"] == {"CB1234AB": {"clamp"}}
+    everyone = await db.get_all_approved_with_profiles()
+    assert everyone[0]["disabled_checks"] == {"CB1234AB": {"clamp"}}
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_vehicle_clears_only_its_opt_outs(tmp_db):
+    await _approved_with_vehicle()
+    await db.set_check_enabled(1, "CB1234AB", "sticker", enabled=False)
+    await db.set_check_enabled(1, "", "fines", enabled=False)
+
+    await db.delete_vehicle(1, "CB1234AB")
+
+    assert await db.list_opt_outs(1) == {"": {"fines"}}
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_profile_clears_all_opt_outs(tmp_db):
+    await _approved_with_vehicle()
+    await db.set_check_enabled(1, "CB1234AB", "sticker", enabled=False)
+    await db.set_check_enabled(1, "", "fines", enabled=False)
+
+    await db.delete_profile(1)
+
+    assert await db.list_opt_outs(1) == {}

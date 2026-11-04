@@ -40,6 +40,7 @@ stored profile (national ID, driving licence, vehicle plate).
 | `/enroll` | Wizard to save national ID, driving licence, and your main vehicle (plate + talon) |
 | `/vehicles` | List your vehicles, choose the main one, remove one |
 | `/addvehicle` | Add another vehicle (up to a maximum) |
+| `/alerts` | Choose what your daily report includes, per vehicle |
 | `/myinfo` | Show your saved data and vehicles |
 | `/driver` | Check driving licence obligations (MVR API) |
 | `/plate [PLATE]` | Check vehicle obligations (MVR API) |
@@ -48,7 +49,8 @@ stored profile (national ID, driving licence, vehicle plate).
 | `/clamp [PLATE]` | Check wheel-clamp status (sofiatraffic.bg) |
 
 `[PLATE]` is optional — if omitted, your main vehicle is used and the reply
-lists your other vehicles. The daily report checks every saved vehicle.
+lists your other vehicles. The daily report checks every saved vehicle, except
+for the checks you switch off with `/alerts`; each message lists its hidden ones.
 
 ### Admin only
 
@@ -126,6 +128,7 @@ graph TD
             HA[admin.py — /approve /deny /pending /users]
             HE[enroll.py — /enroll wizard /myinfo /unenroll]
             HV[vehicles.py — /vehicles /addvehicle]
+            HL[alerts.py — /alerts]
             HO[obligations.py — /driver /plate /vignette /sticker /clamp /gtp /mtpl /fines /vehicle]
             HM[menu.py — /help menu buttons]
             HU[eur.py — /change]
@@ -163,11 +166,13 @@ notify_bot/
   config.py            — env var reading
   db.py                — async SQLite CRUD (aiosqlite)
   middlewares.py       — @require_approved decorator
+  report_checks.py     — the daily report's checks and which ones apply to a user
   handlers/
     common.py          — /start, /help, /request
     admin.py           — /approve, /deny, /pending, /users
     enroll.py          — /enroll wizard, /myinfo, /unenroll
     vehicles.py        — /vehicles, /addvehicle
+    alerts.py          — /alerts
     obligations.py     — /driver, /plate, /vignette, /sticker, /clamp, /gtp, /mtpl, /fines, /vehicle
     menu.py            — /help menu buttons
     eur.py             — /change

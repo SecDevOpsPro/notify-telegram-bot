@@ -22,6 +22,7 @@ graph TD
             HA["admin.py<br/>/approve /deny /pending /users"]
             HE["enroll.py<br/>/enroll wizard /myinfo /unenroll"]
             HV["vehicles.py<br/>/vehicles /addvehicle"]
+            HL["alerts.py<br/>/alerts"]
             HO["obligations.py<br/>/driver /plate /vignette /sticker<br/>/clamp /gtp /mtpl /fines /vehicle"]
             HM["menu.py<br/>/help menu buttons"]
             HU["eur.py<br/>/change"]
@@ -78,12 +79,14 @@ graph LR
     root --> upd["updates.py — require(), HandlerCallback"]
     root --> dt["dates.py — API date parsing and formatting"]
     root --> tr["translation.py — offline Bulgarian to English"]
+    root --> rc["report_checks.py — daily report checks and applicability"]
 
     root --> h["handlers/"]
     h --> hc["common.py — /start /help /request"]
     h --> ha["admin.py — /approve /deny /pending /users"]
     h --> he["enroll.py — /enroll wizard /myinfo /unenroll"]
     h --> hv["vehicles.py — /vehicles /addvehicle"]
+    h --> hl["alerts.py — /alerts"]
     h --> ho["obligations.py — /driver /plate /vignette /sticker /clamp /gtp /mtpl /fines /vehicle"]
     h --> hm["menu.py — /help menu buttons"]
     h --> hu["eur.py — /change"]
@@ -141,12 +144,22 @@ erDiagram
         TEXT    created_at
         TEXT    updated_at
     }
+    report_opt_outs {
+        INTEGER user_id PK, FK
+        TEXT    plate PK
+        TEXT    check_name PK
+        TEXT    created_at
+    }
     users ||--o| user_profiles : "has profile"
     users ||--o{ user_vehicles : "has up to a maximum"
+    users ||--o{ report_opt_outs : "switches off"
 ```
 
 `user_profiles.vehicle_plate` names the user's main (preferred) vehicle in
 `user_vehicles`; `(user_id, plate)` is unique.
+
+`report_opt_outs` holds the daily report checks a user switched off with `/alerts`;
+every other check is on. `plate` is the vehicle, or `''` for the personal checks.
 
 `status` values: `pending` · `approved` · `denied`
 
@@ -324,6 +337,7 @@ See [api-sofiatraffic.md](api-sofiatraffic.md) for full API reference.
 | `/myinfo` | `enroll.py` | Show saved personal data and vehicles |
 | `/unenroll` | `enroll.py` | Delete saved personal data and all vehicles |
 | `/vehicles`, `/addvehicle` | `vehicles.py` | List, add, remove vehicles; choose the main one |
+| `/alerts` | `alerts.py` | Choose what the daily report includes, per vehicle |
 | `/driver` | `obligations.py` | Check driving licence obligations via MVR API |
 | `/plate [PLATE]` | `obligations.py` | Check vehicle obligations via MVR API |
 | `/vignette [PLATE]` | `obligations.py` | Check road e-vignette via bgtoll.bg |

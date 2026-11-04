@@ -27,6 +27,7 @@ from notify_bot.dates import expiry_warning
 from notify_bot.db import ReportTarget
 from notify_bot.errors import format_error
 from notify_bot.payment_buttons import build_fines_keyboard
+from notify_bot.report_checks import LABELS, PERSONAL_SCOPE, personal_checks, vehicle_checks
 from notify_bot.services.bgtoll import (
     BgtollError,
     CloudflareBlockedError,
@@ -92,6 +93,24 @@ def _retry_button(label: str, command: str, plate: str | None = None) -> InlineK
     if plate:
         return InlineKeyboardButton(f"🔁 {label} {plate}", callback_data=f"cmd:{command}:{plate}")
     return InlineKeyboardButton(f"🔁 {label}", callback_data=f"cmd:{command}")
+
+
+def _hidden_footer(user: ReportTarget, group: list[str | None]) -> list[str]:
+    """The line naming the checks switched off for one message (*group*'s plates)."""
+    disabled = user.get("disabled_checks", {})
+    national_id = user.get("national_id")
+    hidden: list[str] = []
+    for key in group:
+        if key is None:
+            scope, checks = (
+                PERSONAL_SCOPE,
+                personal_checks(national_id, user.get("driving_licence")),
+            )
+        else:
+            scope, checks = key, vehicle_checks(national_id)
+        off = disabled.get(scope, set())
+        hidden.extend(LABELS[check] for check in checks if check in off)
+    return [f"🔕 Hidden: {', '.join(hidden)}. Change with /alerts"] if hidden else []
 
 
 def _report_keyboard(
@@ -188,14 +207,19 @@ async def _build_report(user: ReportTarget) -> _Report | None:
     or fail.
     Sections follow the order the checks run in: fines and the MVR licence
     details first, then for each vehicle (preferred first) its MVR plate
-    details, inspection, MTPL, vignette, parking sticker and wheel clamp.
-    Returns ``None`` only when the user has no profile data that any check
-    applies to.
+    details, inspection, MTPL, vignette, parking sticker and wheel clamp,
+    under a header naming its plate.
+    Checks the user opted out of with /alerts don't run; each message lists its
+    own in a footer.  A vehicle left with no sections gets no message.
+    Returns ``None`` when no section remains: no check applies, or those that
+    do are all switched off or have nothing to show.
     """
     uid: int = user["user_id"]
     name: str = user.get("first_name") or "there"
     national_id: str | None = user.get("national_id")
     licence: str | None = user.get("driving_licence")
+    disabled = user.get("disabled_checks", {})
+    personal_off = disabled.get(PERSONAL_SCOPE, set())
 
     sections: list[str] = []
     licence_units: list[Obligation] = []  # decide which /driver, /plate buttons the report gets
@@ -212,7 +236,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
             await asyncio.sleep(_INTER_CHECK_DELAY)
         calls_made = True
 
-    if national_id and licence:
+    if national_id and licence and "fines" not in personal_off:
         try:
             await pause()
             fines = await _retry(check_fines, driver_licence_no=licence, egn=national_id)
@@ -233,7 +257,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
             retries.setdefault(None, []).append(_retry_button("Retry fines", "fines"))
         sections.append(fines_section)
 
-    if national_id and licence:
+    if national_id and licence and "licence" not in personal_off:
         try:
             await pause()
             units = await _retry(check_by_licence, national_id=national_id, licence_number=licence)
@@ -250,9 +274,10 @@ async def _build_report(user: ReportTarget) -> _Report | None:
         vehicle_starts.append(len(sections))
         plate = vehicle["plate"]
         talon = vehicle["talon_no"]
+        vehicle_off = disabled.get(plate, set())
 
-        if national_id:
-            plate_title = f"🚗 <b>By vehicle plate {plate} (MVR):</b>"
+        if national_id and "plate" not in vehicle_off:
+            plate_title = "🚗 <b>By vehicle plate (MVR):</b>"
             try:
                 await pause()
                 units = await _retry(check_by_plate, national_id=national_id, plate_number=plate)
@@ -264,129 +289,144 @@ async def _build_report(user: ReportTarget) -> _Report | None:
                 sections.append(_check_failed(uid, plate_title, exc))
                 retries.setdefault(plate, []).append(_retry_button("Retry plate", "plate", plate))
 
-        gtp_title = f"🔧 <b>Technical Inspection ({plate}):</b>"
-        if not talon:
-            sections.append(f"{gtp_title}\n⚠️ Talon number missing — save it with /vehicles.")
-        else:
+        if "gtp" not in vehicle_off:
+            gtp_title = "🔧 <b>Technical Inspection:</b>"
+            if not talon:
+                sections.append(f"{gtp_title}\n⚠️ Talon number missing — save it with /vehicles.")
+            else:
+                try:
+                    await pause()
+                    gtp = await _retry(check_gtp, car_no=plate, talon_no=talon)
+                    if gtp.found:
+                        gtp_lines = [gtp_title, f"✅ Valid until: {gtp.valid_to}"]
+                        if warning := expiry_warning(gtp.valid_to):
+                            gtp_lines.append(warning)
+                        sections.append("\n".join(gtp_lines))
+                    else:
+                        sections.append(f"{gtp_title}\n❌ No valid inspection found.")
+                except BoleronError as exc:
+                    logger.warning("GTP check failed for user %s (%s): %s", uid, plate, exc)
+                    sections.append(_check_failed(uid, gtp_title, exc))
+                    retries.setdefault(plate, []).append(_retry_button("Retry GTP", "gtp", plate))
+
+        if "mtpl" not in vehicle_off:
+            mtpl_title = "🛡️ <b>Civil Liability / MTPL:</b>"
             try:
                 await pause()
-                gtp = await _retry(check_gtp, car_no=plate, talon_no=talon)
-                if gtp.found:
-                    gtp_lines = [gtp_title, f"✅ Valid until: {gtp.valid_to}"]
-                    if warning := expiry_warning(gtp.valid_to):
-                        gtp_lines.append(warning)
-                    sections.append("\n".join(gtp_lines))
-                else:
-                    sections.append(f"{gtp_title}\n❌ No valid inspection found.")
+                mtpl = await _retry(check_mtpl, plate)
+                status_icon = "✅" if mtpl.active else "❌"
+                mtpl_lines = [
+                    mtpl_title,
+                    f"{status_icon} {'Active' if mtpl.active else 'No active policy'}",
+                ]
+                if mtpl.insurer:
+                    mtpl_lines.append(f"🏢 {mtpl.insurer}")
+                if mtpl.valid_to:
+                    mtpl_lines.append(f"📅 Valid until: {mtpl.valid_to}")
+                if warning := expiry_warning(mtpl.valid_to):
+                    mtpl_lines.append(warning)
+                sections.append("\n".join(mtpl_lines))
             except BoleronError as exc:
-                logger.warning("GTP check failed for user %s (%s): %s", uid, plate, exc)
-                sections.append(_check_failed(uid, gtp_title, exc))
-                retries.setdefault(plate, []).append(_retry_button("Retry GTP", "gtp", plate))
+                logger.warning("MTPL check failed for user %s (%s): %s", uid, plate, exc)
+                sections.append(_check_failed(uid, mtpl_title, exc))
+                retries.setdefault(plate, []).append(_retry_button("Retry MTPL", "mtpl", plate))
 
-        mtpl_title = f"🛡️ <b>Civil Liability / MTPL ({plate}):</b>"
-        try:
-            await pause()
-            mtpl = await _retry(check_mtpl, plate)
-            status_icon = "✅" if mtpl.active else "❌"
-            mtpl_lines = [
-                mtpl_title,
-                f"{status_icon} {'Active' if mtpl.active else 'No active policy'}",
-            ]
-            if mtpl.insurer:
-                mtpl_lines.append(f"🏢 {mtpl.insurer}")
-            if mtpl.valid_to:
-                mtpl_lines.append(f"📅 Valid until: {mtpl.valid_to}")
-            if warning := expiry_warning(mtpl.valid_to):
-                mtpl_lines.append(warning)
-            sections.append("\n".join(mtpl_lines))
-        except BoleronError as exc:
-            logger.warning("MTPL check failed for user %s (%s): %s", uid, plate, exc)
-            sections.append(_check_failed(uid, mtpl_title, exc))
-            retries.setdefault(plate, []).append(_retry_button("Retry MTPL", "mtpl", plate))
-
-        vignette_title = f"🛣️ <b>Vignette ({plate}):</b>"
-        try:
-            await pause()
-            vignette = await _retry(check_vignette, plate, skip_on=(CloudflareBlockedError,))
-            if vignette.found:
-                status_icon = "✅" if vignette.is_valid else "❌"
-                status_label = "Active" if vignette.is_valid else "Inactive"
-                vignette_lines = [vignette_title, f"{status_icon} Status: {status_label}"]
-                vignette_lines.extend(
-                    format_validity_period(vignette.validity_date_from, vignette.validity_date_to)
-                )
-                if vignette.vignette_type:
-                    vignette_lines.append(f"📋 Type: {vignette.vignette_type}")
-                if warning := expiry_warning(vignette.validity_date_to):
-                    vignette_lines.append(warning)
-                sections.append("\n".join(vignette_lines))
-            else:
-                sections.append(f"{vignette_title}\n❌ No active vignette found.")
-        except (CloudflareBlockedError, BgtollError) as exc:
-            logger.debug(
-                "Vignette check failed for user %s (%s) — falling back to boleron", uid, exc
-            )
+        if "vignette" not in vehicle_off:
+            vignette_title = "🛣️ <b>Vignette:</b>"
             try:
-                bv: BoleronVignetteInfo = await _retry(check_vignette_boleron, plate)
-                if bv.found:
-                    status_icon = "✅" if bv.active else "❌"
-                    status_label = "Active" if bv.active else "Inactive"
-                    bv_lines = [vignette_title, f"{status_icon} Status: {status_label}"]
-                    bv_lines.extend(format_validity_period(bv.valid_from, bv.valid_to))
-                    if bv.validity_type:
-                        bv_lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
-                    if bv.price:
-                        bv_lines.append(f"💰 Price: {bv.price}")
-                    if warning := expiry_warning(bv.valid_to):
-                        bv_lines.append(warning)
-                    sections.append("\n".join(bv_lines))
+                await pause()
+                vignette = await _retry(check_vignette, plate, skip_on=(CloudflareBlockedError,))
+                if vignette.found:
+                    status_icon = "✅" if vignette.is_valid else "❌"
+                    status_label = "Active" if vignette.is_valid else "Inactive"
+                    vignette_lines = [vignette_title, f"{status_icon} Status: {status_label}"]
+                    vignette_lines.extend(
+                        format_validity_period(
+                            vignette.validity_date_from, vignette.validity_date_to
+                        )
+                    )
+                    if vignette.vignette_type:
+                        vignette_lines.append(f"📋 Type: {vignette.vignette_type}")
+                    if warning := expiry_warning(vignette.validity_date_to):
+                        vignette_lines.append(warning)
+                    sections.append("\n".join(vignette_lines))
                 else:
                     sections.append(f"{vignette_title}\n❌ No active vignette found.")
-            except BoleronError as exc:
-                logger.warning("Boleron vignette fallback failed for user %s: %s", uid, exc)
-                sections.append(_check_failed(uid, vignette_title, exc))
+            except (CloudflareBlockedError, BgtollError) as exc:
+                logger.debug(
+                    "Vignette check failed for user %s (%s) — falling back to boleron", uid, exc
+                )
+                try:
+                    bv: BoleronVignetteInfo = await _retry(check_vignette_boleron, plate)
+                    if bv.found:
+                        status_icon = "✅" if bv.active else "❌"
+                        status_label = "Active" if bv.active else "Inactive"
+                        bv_lines = [vignette_title, f"{status_icon} Status: {status_label}"]
+                        bv_lines.extend(format_validity_period(bv.valid_from, bv.valid_to))
+                        if bv.validity_type:
+                            bv_lines.append(f"📋 Type: {bv.validity_type.capitalize()}")
+                        if bv.price:
+                            bv_lines.append(f"💰 Price: {bv.price}")
+                        if warning := expiry_warning(bv.valid_to):
+                            bv_lines.append(warning)
+                        sections.append("\n".join(bv_lines))
+                    else:
+                        sections.append(f"{vignette_title}\n❌ No active vignette found.")
+                except BoleronError as exc:
+                    logger.warning("Boleron vignette fallback failed for user %s: %s", uid, exc)
+                    sections.append(_check_failed(uid, vignette_title, exc))
+                    retries.setdefault(plate, []).append(
+                        _retry_button("Retry vignette", "vignette", plate)
+                    )
+
+        if "sticker" not in vehicle_off:
+            sticker_title = "🅿️ <b>Parking sticker:</b>"
+            try:
+                await pause()
+                sticker = await _retry(check_sticker, plate, skip_on=(SofiaCloudflareError,))
+                if sticker.found:
+                    status_icon = "✅" if sticker.is_valid else "❌"
+                    sticker_lines = [
+                        sticker_title,
+                        f"{status_icon} Status: {sticker.status or 'Unknown'}",
+                    ]
+                    sticker_lines.extend(
+                        format_validity_period(sticker.valid_from, sticker.valid_to)
+                    )
+                    if warning := expiry_warning(sticker.valid_to):
+                        sticker_lines.append(warning)
+                    if sticker.zone:
+                        sticker_lines.append(f"📍 Zone: {sticker.zone}")
+                    if sticker.sticker_type:
+                        sticker_lines.append(f"📋 Type: {sticker.sticker_type}")
+                    sections.append("\n".join(sticker_lines))
+            except (SofiaCloudflareError, SofiaTrafficError) as exc:
+                logger.warning("Sticker check failed for user %s (%s): %s", uid, plate, exc)
+                sections.append(_check_failed(uid, sticker_title, exc))
                 retries.setdefault(plate, []).append(
-                    _retry_button("Retry vignette", "vignette", plate)
+                    _retry_button("Retry sticker", "sticker", plate)
                 )
 
-        sticker_title = f"🅿️ <b>Parking sticker ({plate}):</b>"
-        try:
-            await pause()
-            sticker = await _retry(check_sticker, plate, skip_on=(SofiaCloudflareError,))
-            if sticker.found:
-                status_icon = "✅" if sticker.is_valid else "❌"
-                sticker_lines = [
-                    sticker_title,
-                    f"{status_icon} Status: {sticker.status or 'Unknown'}",
-                ]
-                sticker_lines.extend(format_validity_period(sticker.valid_from, sticker.valid_to))
-                if warning := expiry_warning(sticker.valid_to):
-                    sticker_lines.append(warning)
-                if sticker.zone:
-                    sticker_lines.append(f"📍 Zone: {sticker.zone}")
-                if sticker.sticker_type:
-                    sticker_lines.append(f"📋 Type: {sticker.sticker_type}")
-                sections.append("\n".join(sticker_lines))
-        except (SofiaCloudflareError, SofiaTrafficError) as exc:
-            logger.warning("Sticker check failed for user %s (%s): %s", uid, plate, exc)
-            sections.append(_check_failed(uid, sticker_title, exc))
-            retries.setdefault(plate, []).append(_retry_button("Retry sticker", "sticker", plate))
+        if "clamp" not in vehicle_off:
+            clamp_title = "🔒 <b>Wheel clamp:</b>"
+            try:
+                await pause()
+                clamp = await _retry(check_clamp, plate, skip_on=(SofiaCloudflareError,))
+                if clamp.found and clamp.clamped:
+                    clamp_lines = [clamp_title, "❌ Vehicle <b>IS wheel-clamped!</b>"]
+                    if clamp.clamped_at:
+                        clamp_lines.append(f"🕐 Clamped at: {clamp.clamped_at}")
+                    if clamp.location:
+                        clamp_lines.append(f"📍 Location: {clamp.location}")
+                    sections.append("\n".join(clamp_lines))
+            except (SofiaCloudflareError, SofiaTrafficError) as exc:
+                logger.warning("Clamp check failed for user %s (%s): %s", uid, plate, exc)
+                sections.append(_check_failed(uid, clamp_title, exc))
+                retries.setdefault(plate, []).append(_retry_button("Retry clamp", "clamp", plate))
 
-        clamp_title = f"🔒 <b>Wheel clamp ({plate}):</b>"
-        try:
-            await pause()
-            clamp = await _retry(check_clamp, plate, skip_on=(SofiaCloudflareError,))
-            if clamp.found and clamp.clamped:
-                clamp_lines = [clamp_title, "❌ Vehicle <b>IS wheel-clamped!</b>"]
-                if clamp.clamped_at:
-                    clamp_lines.append(f"🕐 Clamped at: {clamp.clamped_at}")
-                if clamp.location:
-                    clamp_lines.append(f"📍 Location: {clamp.location}")
-                sections.append("\n".join(clamp_lines))
-        except (SofiaCloudflareError, SofiaTrafficError) as exc:
-            logger.warning("Clamp check failed for user %s (%s): %s", uid, plate, exc)
-            sections.append(_check_failed(uid, clamp_title, exc))
-            retries.setdefault(plate, []).append(_retry_button("Retry clamp", "clamp", plate))
+        # One header per vehicle instead of the plate in every section title.
+        if len(sections) > vehicle_starts[-1]:
+            sections.insert(vehicle_starts[-1], f"🚗 <b>{plate}</b>")
 
     if not sections:
         return None
@@ -396,18 +436,24 @@ async def _build_report(user: ReportTarget) -> _Report | None:
     plates: list[str | None] = [v["plate"] for v in user["vehicles"]]
     groups = [[None, *plates[:1]], *([p] for p in plates[1:])]
     bounds = [0, *vehicle_starts[1:], len(sections)]
-    entries = ["\n\n".join(sections[a:b]) for a, b in zip(bounds, bounds[1:], strict=False)]
-    entries[0] = f"☀️ Good morning, {name}!\n\n{entries[0]}"
-    keyboards = [
-        _report_keyboard(
-            build_fines_keyboard(
-                licence=licence_units if None in group else [],
-                plates={p: plate_units[p] for p in group if p in plate_units},
-            ),
-            [b for key in group for b in retries.get(key, [])],
+    entries: list[str] = []
+    keyboards: list[InlineKeyboardMarkup | None] = []
+    for group, (a, b) in zip(groups, zip(bounds, bounds[1:], strict=False), strict=True):
+        # Opt-outs can leave a vehicle with nothing to say, and Telegram rejects
+        # an empty message.  Its buttons only ever accompany a section, so none are lost.
+        if a == b:
+            continue
+        entries.append("\n\n".join([*sections[a:b], *_hidden_footer(user, group)]))
+        keyboards.append(
+            _report_keyboard(
+                build_fines_keyboard(
+                    licence=licence_units if None in group else [],
+                    plates={p: plate_units[p] for p in group if p in plate_units},
+                ),
+                [b for key in group for b in retries.get(key, [])],
+            )
         )
-        for group in groups
-    ]
+    entries[0] = f"☀️ Good morning, {name}!\n\n{entries[0]}"
     return _Report(entries=tuple(entries), keyboards=tuple(keyboards))
 
 

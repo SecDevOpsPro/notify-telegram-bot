@@ -41,6 +41,7 @@ from notify_bot.handlers.admin import (
     undebug_cmd,
     users_cmd,
 )
+from notify_bot.handlers.alerts import alerts_command, build_alerts_button_handler
 from notify_bot.handlers.common import help_command, request_access, start, unknown_command
 from notify_bot.handlers.enroll import (
     build_enroll_handler,
@@ -174,6 +175,7 @@ async def _post_init(application: Application) -> None:
             BotCommand("vehicle", "Show vehicle registration data"),
             BotCommand("vehicles", "List and manage your vehicles"),
             BotCommand("addvehicle", "Add another vehicle"),
+            BotCommand("alerts", "Choose what your daily report includes"),
             BotCommand("myip", "Show bot's public IP (admin only)"),
             BotCommand("debug", "Grant a user verbose error detail (admin only)"),
             BotCommand("undebug", "Revoke a user's verbose error detail (admin only)"),
@@ -248,11 +250,13 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("fines", fines_command))
     application.add_handler(CommandHandler("vehicle", vehicle_command))
     application.add_handler(CommandHandler("vehicles", vehicles_command))
+    application.add_handler(CommandHandler("alerts", alerts_command))
 
     # ── Inline button callbacks ───────────────────────────────────────────────
     # Pattern must be registered before a generic catch-all if one were added
     application.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^(approve|deny):"))
     application.add_handler(build_vehicle_button_handler())
+    application.add_handler(build_alerts_button_handler())
 
     # Menu buttons — registered after the ConversationHandlers above, so their own
     # "cmd:enroll" / "cmd:addvehicle" entry points claim those callbacks first.

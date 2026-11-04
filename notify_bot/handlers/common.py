@@ -50,6 +50,7 @@ _ALL_COMMANDS_PUBLIC = """
 /unenroll — Delete your saved profile data and vehicles
 /vehicles — List your vehicles, choose the main one, remove one
 /addvehicle — Add another vehicle (up to a maximum)
+/alerts   — Choose what your daily report includes
 /driver   — Check driving licence obligations (MVR)
 /plate    — Check vehicle obligations (MVR) — also: /plate &lt;plate&gt;
 /vignette — Check road e-vignette (bgtoll.bg) — also: /vignette &lt;plate&gt;

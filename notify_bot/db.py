@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS report_opt_outs (
     plate       TEXT NOT NULL,
     check_name  TEXT NOT NULL,
     created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
     PRIMARY KEY (user_id, plate, check_name)
 )
 """
@@ -217,6 +218,17 @@ async def _write(sql: str, params: tuple[Any, ...] = ()) -> None:
         await conn.execute(sql, params)
 
 
+# TODO: remove this function and its call in init_db() in the next PR — it only
+# upgrades databases created before report_opt_outs had updated_at.
+async def _add_opt_outs_updated_at(conn: aiosqlite.Connection) -> None:
+    """Add ``updated_at`` to an existing table; a no-op once the column exists."""
+    async with conn.execute("PRAGMA table_info(report_opt_outs)") as cur:
+        if any(row[1] == "updated_at" for row in await cur.fetchall()):
+            return
+    await conn.execute("ALTER TABLE report_opt_outs ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+    await conn.execute("UPDATE report_opt_outs SET updated_at = created_at")
+
+
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 
@@ -262,6 +274,7 @@ async def init_db() -> None:
             await conn.execute(_CREATE_PROFILES)
             await conn.execute(_CREATE_VEHICLES)
             await conn.execute(_CREATE_REPORT_OPT_OUTS)
+            await _add_opt_outs_updated_at(conn)  # one-off; see its TODO
             await legacy_upgrade.upgrade(conn)  # one-off; remove with legacy_upgrade.py
             await conn.commit()
         except BaseException:
@@ -528,10 +541,11 @@ async def set_check_enabled(user_id: int, scope: str, check: ReportCheck, *, ena
             (user_id, plate, check),
         )
     else:
+        now = _now()
         await _write(
-            "INSERT OR IGNORE INTO report_opt_outs (user_id, plate, check_name, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (user_id, plate, check, _now()),
+            "INSERT OR IGNORE INTO report_opt_outs "
+            "(user_id, plate, check_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, plate, check, now, now),
         )
 
 

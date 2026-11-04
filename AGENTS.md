@@ -79,6 +79,8 @@ wired up in `run_bot.py`.
   (`save_vehicle`, `set_preferred_vehicle`, `delete_vehicle`), which keep it
   pointing at an existing vehicle. Plate commands resolve their plate with
   `obligations._pick_vehicle` (argument, else main vehicle).
+- **Table timestamps.** Every table has `created_at` and `updated_at` columns
+  from the moment it's created, so neither needs a migration later.
 - **Daily report opt-outs.** `/alerts` stores only what a user switched off, in
   `report_opt_outs` by plate (`''` for personal checks), so checks default to on.
   A new report check needs an entry in `report_checks.py` and an enabled test in

@@ -659,7 +659,9 @@ async def test_every_vehicle_is_checked_preferred_first():
     ]
     assert [c.args for c in mtpl.await_args_list] == [(PLATE,), (OTHER_PLATE,)]
     assert [c.kwargs["plate_number"] for c in plate.await_args_list] == [PLATE, OTHER_PLATE]
-    assert message.index(f"🚗 <b>{PLATE}</b>") < message.index(f"🚗 <b>{OTHER_PLATE}</b>")
+    assert message.index(f"🚗 <b>Plate: {PLATE}</b>") < message.index(
+        f"🚗 <b>Plate: {OTHER_PLATE}</b>"
+    )
 
 
 @pytest.mark.asyncio
@@ -704,8 +706,12 @@ async def test_personal_checks_and_main_vehicle_share_the_first_message():
     assert report is not None and len(report.entries) == 2
     first, second = report.entries
     assert first.startswith("☀️ Good morning")
-    assert "Traffic Fines" in first and f"🚗 <b>{PLATE}</b>" in first and OTHER_PLATE not in first
-    assert f"🚗 <b>{OTHER_PLATE}</b>" in second and PLATE not in second
+    assert (
+        "Traffic Fines" in first
+        and f"🚗 <b>Plate: {PLATE}</b>" in first
+        and OTHER_PLATE not in first
+    )
+    assert f"🚗 <b>Plate: {OTHER_PLATE}</b>" in second and PLATE not in second
 
 
 @pytest.mark.asyncio
@@ -863,8 +869,8 @@ async def test_plate_appears_once_as_a_header_after_the_personal_checks():
     with _patched():
         message = await _report_text(_FULL_USER)
     assert message.count(PLATE) == 1
-    assert message.index("Traffic Fines") < message.index(f"🚗 <b>{PLATE}</b>")
-    assert message.index(f"🚗 <b>{PLATE}</b>") < message.index("Technical Inspection")
+    assert message.index("Traffic Fines") < message.index(f"🚗 <b>Plate: {PLATE}</b>")
+    assert message.index(f"🚗 <b>Plate: {PLATE}</b>") < message.index("Technical Inspection")
 
 
 @pytest.mark.asyncio

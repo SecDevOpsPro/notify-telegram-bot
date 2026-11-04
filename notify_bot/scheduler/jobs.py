@@ -426,7 +426,7 @@ async def _build_report(user: ReportTarget) -> _Report | None:
 
         # One header per vehicle instead of the plate in every section title.
         if len(sections) > vehicle_starts[-1]:
-            sections.insert(vehicle_starts[-1], f"🚗 <b>{plate}</b>")
+            sections.insert(vehicle_starts[-1], f"🚗 <b>Plate: {plate}</b>")
 
     if not sections:
         return None

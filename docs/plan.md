@@ -149,6 +149,7 @@ erDiagram
         TEXT    plate PK
         TEXT    check_name PK
         TEXT    created_at
+        TEXT    updated_at
     }
     users ||--o| user_profiles : "has profile"
     users ||--o{ user_vehicles : "has up to a maximum"
